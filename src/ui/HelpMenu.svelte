@@ -13,6 +13,12 @@
     loadDemo();
     open = false;
   }
+
+  const repoUrl = "https://github.com/lassebm/web-logic-analyzer";
+  // Injected at build time (vite.config.ts); "unknown" when built without git.
+  const commit = __GIT_COMMIT__;
+  const branch = __GIT_BRANCH__;
+  const commitUrl = commit === "unknown" ? null : `${repoUrl}/commit/${commit}`;
 </script>
 
 <svelte:window
@@ -45,12 +51,23 @@
         protocol and adds every decoder, pre-wired.
       </p>
 
-      <a
-        class="link"
-        href="https://github.com/lassebm/web-logic-analyzer"
-        target="_blank"
-        rel="noopener noreferrer">Documentation &amp; source ↗</a
+      <a class="link" href={repoUrl} target="_blank" rel="noopener noreferrer"
+        >Documentation &amp; source ↗</a
       >
+
+      <div class="build mono">
+        {branch} ·
+        {#if commitUrl}
+          <a
+            class="link"
+            href={commitUrl}
+            target="_blank"
+            rel="noopener noreferrer">{commit}</a
+          >
+        {:else}
+          {commit}
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -117,5 +134,13 @@
   }
   .link:hover {
     text-decoration: underline;
+  }
+  /* Build provenance: quiet footer, separated from the content above. */
+  .build {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-ui);
+    color: var(--fg-dim);
   }
 </style>

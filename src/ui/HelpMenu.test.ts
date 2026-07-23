@@ -32,4 +32,17 @@ describe("HelpMenu", () => {
     expect(get(captureBuffer)?.sampleCount ?? 0).toBeGreaterThan(0);
     expect(get(decoders).length).toBeGreaterThan(0);
   });
+
+  it("shows the build commit linking to the GitHub commit", async () => {
+    render(HelpMenu);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Help and demo" }),
+    );
+    // __GIT_COMMIT__ is injected by Vite `define` (real short hash in tests).
+    const link = screen.getByRole("link", { name: __GIT_COMMIT__ });
+    expect(link).toHaveAttribute(
+      "href",
+      expect.stringContaining(`/commit/${__GIT_COMMIT__}`),
+    );
+  });
 });

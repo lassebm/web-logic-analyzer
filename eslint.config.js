@@ -16,7 +16,13 @@ export default ts.config(
 
   {
     languageOptions: {
-      globals: { ...globals.browser, ...globals.node },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        // Build-time constants injected by Vite `define` (see vite.config.ts).
+        __GIT_COMMIT__: "readonly",
+        __GIT_BRANCH__: "readonly",
+      },
     },
     rules: {
       // Allow intentionally-unused bindings prefixed with `_` (e.g. `{#each xs as _, i}`).
