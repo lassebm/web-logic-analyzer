@@ -1,0 +1,90 @@
+:root {
+  --bg: #0f1115;
+  --bg-panel: #171a21;
+  --bg-elev: #1f242e;
+  --border: #2a2f3a;
+  --fg: #d7dbe2;
+  --fg-dim: #8b93a3;
+  --accent: #4f9dff;
+  --accent-dim: #2a5a9e;
+  --danger: #ff5c5c;
+  --ok: #4fd48a;
+  --warn: #ffcc5c;
+  --warn-bg: #2a2410; /* muted amber surface behind warning text */
+  --bg-ruler: #141821; /* time-ruler band (matches the canvas ruler fill) */
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45); /* popover/elevated surfaces */
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /* Type scale (role-based). Use these tokens instead of hardcoded px.
+     --fs-ui is the workhorse and the floor for any HTML text; --fs-micro is
+     reserved for dense canvas readouts (the time ruler), never DOM text. */
+  --fs-title: 15px; /* panel / section titles */
+  --fs-body: 14px; /* primary body text (the document default) */
+  --fs-ui: 12px; /* labels, readouts, controls, popovers, badges, small buttons */
+  --fs-micro: 10px; /* canvas ruler ticks only */
+
+  color-scheme: dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+  font-size: var(--fs-body);
+  color: var(--fg);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent-dim);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+select,
+input {
+  font: inherit;
+  font-size: var(--fs-ui);
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+label {
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
+}
+
+.mono {
+  font-family: var(--mono);
+}
