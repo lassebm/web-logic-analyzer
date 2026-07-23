@@ -20,7 +20,12 @@ import type { Annotation, Packet } from "../decode/types";
 import type { WaveView } from "../view/renderer";
 
 export type ConnStatus =
-  "disconnected" | "connecting" | "need-firmware" | "ready" | "error";
+  | "disconnected"
+  | "connecting"
+  | "need-firmware"
+  | "reselect"
+  | "ready"
+  | "error";
 export type CaptureStatus = "idle" | "running" | "done" | "error";
 
 export interface CaptureConfigState {
@@ -130,6 +135,36 @@ export async function connect(): Promise<void> {
   }
 }
 
+/**
+ * Complete setup after a firmware upload whose re-enumerated device could not
+ * reconnect automatically (its running-fx2lafw identity was never granted to
+ * this origin — see provision()). Must run from a user gesture: prompts the
+ * standard device chooser, where the just-re-enumerated device now appears.
+ * Selecting it grants (and persists) that identity, so later reconnects are
+ * silent. Uses the full filters — a running device doesn't reliably present a
+ * POST_FIRMWARE_DEVICES VID:PID, so a narrowed chooser can come up empty.
+ * A cancelled chooser drops back to "reselect" so the user can retry, rather
+ * than the dead-end "error" state.
+ */
+export async function finishConnect(): Promise<void> {
+  try {
+    connStatus.set("connecting");
+    statusMessage.set("Requesting device…");
+    const dev = await Fx2Device.request();
+    await provision(dev);
+  } catch (err) {
+    if (isNoDeviceSelected(err)) {
+      connStatus.set("reselect");
+      statusMessage.set(
+        "No device picked. Click “Finish connecting” and select the device from the list.",
+      );
+      return;
+    }
+    connStatus.set("error");
+    statusMessage.set(friendlyError(err));
+  }
+}
+
 /** Try to reconnect to an already-authorized, ready device without a prompt. */
 export async function tryReconnect(): Promise<void> {
   const authorized = await Fx2Device.getAuthorized();
@@ -181,12 +216,18 @@ async function provision(dev: Fx2Device): Promise<void> {
     );
     await dev.close();
 
+    // Wait for the device to come back under its running-fx2lafw identity. This
+    // succeeds automatically only if this origin already holds permission for
+    // that identity (repeat connects in a normal window). On the first connect —
+    // and every incognito session — the re-enumerated device's VID:PID was never
+    // granted, so getDevices() can't surface it and this times out: we then ask
+    // for one confirming pick via finishConnect() rather than dead-ending.
     statusMessage.set("Waiting for device to re-enumerate…");
     const reenum = await waitForReenumeration();
     if (!reenum) {
-      connStatus.set("need-firmware");
+      connStatus.set("reselect");
       statusMessage.set(
-        "Firmware uploaded, but the device did not reappear automatically. Click Connect and re-select it.",
+        "Firmware uploaded. Click “Finish connecting” and pick the device from the list.",
       );
       return;
     }
@@ -572,6 +613,12 @@ function errMsg(err: unknown): string {
 
 function hex4(n: number): string {
   return "0x" + n.toString(16).padStart(4, "0");
+}
+
+/** A cancelled/empty device chooser (user closed it without picking). */
+function isNoDeviceSelected(err: unknown): boolean {
+  const m = errMsg(err).toLowerCase();
+  return m.includes("no device selected") || m.includes("user gesture");
 }
 
 /** Translate common WebUSB errors into guidance a user can act on. */

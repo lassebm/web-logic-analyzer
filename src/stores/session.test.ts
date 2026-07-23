@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import {
   FakeUSBDevice,
@@ -7,6 +7,7 @@ import {
 } from "../test/fakeUsb";
 import {
   connect,
+  finishConnect,
   disconnect,
   startCapture,
   stopCapture,
@@ -268,6 +269,70 @@ describe("session connect (firmware upload path)", () => {
     expect(Array.from(chunkWrite!.data)).toEqual(Array.from(fwBytes));
     // CPU reset was asserted and released via the CPUCS register.
     expect(loads.some((c) => c.value === CPUCS_ADDR)).toBe(true);
+  });
+
+  it("falls back to a re-select prompt when the device never re-enumerates", async () => {
+    // Uses fake timers so the full waitForReenumeration timeout elapses without
+    // a real-time wait. Mirrors a first-ever connect / incognito session: the
+    // re-enumerated device's identity was never granted, so it can't be surfaced
+    // automatically and the wait times out.
+    vi.useFakeTimers();
+    try {
+      const fwBytes = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+      firmwareInfo.set({
+        name: "custom.fw",
+        size: fwBytes.length,
+        data: fwBytes.buffer.slice(0),
+      });
+
+      const preDevice = new FakeUSBDevice({
+        vendorId: 0x04b4,
+        productId: 0x8613,
+        manufacturerName: "Cypress",
+        productName: "FX2",
+      });
+      handle = installFakeNavigatorUsb({
+        requestDevice: preDevice,
+        authorized: [],
+      });
+
+      const p = connect();
+      // Drive the upload chain and let the re-enumeration wait time out.
+      await vi.advanceTimersByTimeAsync(5000);
+      await p;
+
+      expect(get(connStatus)).toBe("reselect");
+      expect(get(statusMessage)).toMatch(/finish connecting/i);
+      // Firmware was still uploaded before we gave up on auto-reconnect.
+      expect(
+        preDevice.controlOut.some((c) => c.request === REQ_FIRMWARE_LOAD),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("finishConnect completes setup by re-selecting the re-enumerated device", async () => {
+    connStatus.set("reselect");
+    // The device chooser returns the running fx2lafw device.
+    const postDevice = new FakeUSBDevice({ firmwareVersion: [1, 3], revid: 2 });
+    handle = installFakeNavigatorUsb({ requestDevice: postDevice });
+
+    await finishConnect();
+
+    expect(get(connStatus)).toBe("ready");
+    expect(get(deviceLabel)).toMatch(/fw 1\.3/);
+  });
+
+  it("finishConnect stays in reselect when the chooser is cancelled", async () => {
+    connStatus.set("reselect");
+    // No requestDevice configured => the fake throws "No device selected".
+    handle = installFakeNavigatorUsb({});
+
+    await finishConnect();
+
+    expect(get(connStatus)).toBe("reselect");
+    expect(get(statusMessage)).toMatch(/finish connecting/i);
   });
 });
 

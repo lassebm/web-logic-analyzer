@@ -70,11 +70,16 @@ function isPostFirmware(dev: Fx2Device): boolean {
  * fx2lafw identity.
  *
  * If the post-firmware VID:PID was not part of the originally granted
- * permission, getDevices() may not surface it; callers should fall back to
- * Fx2Device.request() to let the user re-select.
+ * permission, getDevices() may not surface it (the grant is per VID:PID, and a
+ * device re-enumerating to a new id counts as never-granted); on timeout the
+ * caller falls back to Fx2Device.request() to let the user re-select. Re-
+ * enumeration normally completes in ~1-2s and, when a grant exists, the connect
+ * event resolves this well before the ceiling; the timeout is really just how
+ * long the un-granted (first-run / incognito) case waits before the re-select
+ * prompt, so it's kept short — but above a normal re-enumeration's worst case.
  */
 export function waitForReenumeration(
-  timeoutMs = 8000,
+  timeoutMs = 3000,
 ): Promise<Fx2Device | null> {
   return new Promise((resolve) => {
     let settled = false;

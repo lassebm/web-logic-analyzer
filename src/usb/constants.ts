@@ -101,7 +101,10 @@ export const POST_FIRMWARE_DEVICES: UsbId[] = [
   { vendorId: 0x1d50, productId: 0x608f }, // usb-c-grok
 ];
 
-/** Combined USB filters for navigator.usb.requestDevice(). */
+/** Combined USB filters for navigator.usb.requestDevice(). Covers both stock and
+ *  running-fx2lafw identities: a running device does not reliably re-enumerate
+ *  to a POST_FIRMWARE_DEVICES VID:PID (some keep a pre-firmware id — we then key
+ *  off the string descriptors, see firmware.ts), so the chooser must offer both. */
 export const USB_FILTERS: USBDeviceFilter[] = [
   ...PRE_FIRMWARE_DEVICES.map((d) => ({
     vendorId: d.vendorId,

@@ -136,4 +136,22 @@ describe("waitForReenumeration", () => {
     handle = installFakeNavigatorUsb({ authorized: [] });
     await expect(waitForReenumeration(50)).resolves.toBeNull();
   });
+
+  it("accepts a re-enumerated device that keeps a pre-firmware VID:PID but reports fx2lafw strings", async () => {
+    // Not all fx2lafw builds renumber to a POST_FIRMWARE_DEVICES id — some keep
+    // the original VID:PID, so acceptance must key off the string descriptors.
+    handle = installFakeNavigatorUsb({ authorized: [] });
+    const pending = waitForReenumeration(5000);
+    const post = new FakeUSBDevice({
+      vendorId: 0x04b4,
+      productId: 0x8613,
+      manufacturerName: "sigrok",
+      productName: "fx2lafw",
+    });
+    handle.authorized.push(post);
+    handle.emitConnect();
+    const resolved = await pending;
+    expect(resolved).not.toBeNull();
+    expect(resolved!.device).toBe(post as unknown as USBDevice);
+  });
 });

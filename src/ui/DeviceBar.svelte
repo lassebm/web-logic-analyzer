@@ -7,6 +7,7 @@
     firmwareInfo,
     fwUploadProgress,
     connect,
+    finishConnect,
     disconnect,
     tryReconnect,
     watchUsbDisconnect,
@@ -66,7 +67,8 @@
   let statusColor = $derived.by(() => {
     if ($connStatus === "ready") return "var(--ok)";
     if ($connStatus === "error") return "var(--danger)";
-    if ($connStatus === "need-firmware") return "var(--warn)";
+    if ($connStatus === "need-firmware" || $connStatus === "reselect")
+      return "var(--warn)";
     return "var(--fg-dim)";
   });
 </script>
@@ -90,6 +92,12 @@
       {#if $connStatus === "ready"}
         <button class="danger" onclick={disconnect}>Disconnect</button>
         <span class="dev mono">{$deviceLabel}</span>
+      {:else if $connStatus === "reselect"}
+        <!-- Firmware uploaded; the re-enumerated device needs one manual pick to
+             grant its new fx2lafw identity (WebUSB can't do it automatically). -->
+        <button class="primary" onclick={finishConnect}
+          >Finish connecting</button
+        >
       {:else}
         <button
           class="primary"
