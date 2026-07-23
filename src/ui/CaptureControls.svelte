@@ -203,35 +203,39 @@
     </div>
   </div>
 
-  <div class="field counter-field">
-    <span class="flabel">{loaded ? "Loaded" : "Captured"}</span>
-    <span class="cval">
-      {#if loaded}
-        {$captureSamples.toLocaleString()} samples
-      {:else}
-        {$captureSamples.toLocaleString()} / {formatSampleCount(
-          $config.sampleLimit,
-        )}
-        samples
-        {#if $captureSamples > 0}
-          <span class="pct">({capturePct}%)</span>
+  <!-- Status + Run/Stop stay welded together as one right-aligned group so they
+       wrap to a new line as a unit instead of drifting apart. -->
+  <div class="status-run">
+    <div class="field counter-field">
+      <span class="flabel">{loaded ? "Loaded" : "Captured"}</span>
+      <span class="cval">
+        {#if loaded}
+          {$captureSamples.toLocaleString()} samples
+        {:else}
+          {$captureSamples.toLocaleString()} / {formatSampleCount(
+            $config.sampleLimit,
+          )}
+          samples
+          {#if $captureSamples > 0}
+            <span class="pct">({capturePct}%)</span>
+          {/if}
         {/if}
-      {/if}
-    </span>
-  </div>
+      </span>
+    </div>
 
-  <div class="field">
-    <span class="flabel">&nbsp;</span>
-    {#if running}
-      <button class="danger" onclick={stopCapture}>Stop</button>
-    {:else}
-      <button
-        class="primary"
-        onclick={startCapture}
-        disabled={!canRun}
-        title={runHint}>Run</button
-      >
-    {/if}
+    <div class="field">
+      <span class="flabel">&nbsp;</span>
+      {#if running}
+        <button class="danger" onclick={stopCapture}>Stop</button>
+      {:else}
+        <button
+          class="primary"
+          onclick={startCapture}
+          disabled={!canRun}
+          title={runHint}>Run</button
+        >
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -258,10 +262,16 @@
     flex-direction: column;
     gap: 4px;
   }
-  /* Push the capture status to the right on wide layouts; reserve width so the
-     Run button doesn't jump as the digit count changes. */
-  .counter-field {
+  /* Status readout + Run/Stop as one unit: pushed right on wide layouts, and
+     wrapping together (never splitting) when the toolbar runs out of room. */
+  .status-run {
+    display: flex;
+    align-items: flex-end;
+    gap: 14px 16px;
     margin-left: auto;
+  }
+  /* Reserve width so the Run button doesn't jump as the digit count changes. */
+  .counter-field {
     min-width: 260px;
   }
   /* Uniform label + control heights so everything lines up across the row. */
