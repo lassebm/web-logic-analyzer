@@ -138,7 +138,12 @@ export class VcdAccumulator {
   private inDefs = true;
   private byte = 0;
   private curT = -1;
-  private snaps: { t: number; byte: number }[] = [];
+  // Value-change groups as parallel typed arrays rather than one object each:
+  // a { t, byte } object costs ~88 bytes against the 9 needed here, and a VCD
+  // exported from a long capture can hold tens of millions of groups.
+  private snapT = new Float64Array(1024);
+  private snapByte = new Uint8Array(1024);
+  private snapN = 0;
   // Exact rate/length from our own $comment, when present (see the exporter).
   private metaRate = 0;
   private metaSamples = -1;
@@ -172,6 +177,10 @@ export class VcdAccumulator {
         const s = /samples=(\d+)/.exec(line);
         if (r) this.metaRate = Number(r[1]);
         if (s) this.metaSamples = Number(s[1]);
+        // Fail on the declaration, not in finish(): a file that declares more
+        // than we accept would otherwise be accumulated in full first, so the
+        // limit couldn't prevent the memory blow-up it exists for.
+        if (this.metaSamples > MAX_SAMPLES) this.tooLong(this.metaSamples);
       } else if (line.startsWith("$var")) {
         // $var wire 1 <id> <name> $end
         const p = line.split(/\s+/);
@@ -184,7 +193,10 @@ export class VcdAccumulator {
     }
     if (line === "") return;
     if (line[0] === "#") {
-      if (this.curT >= 0) this.snaps.push({ t: this.curT, byte: this.byte });
+      if (this.curT >= 0) this.pushSnap(this.curT, this.byte);
+      // A file cannot hold more change groups than samples, so this bounds an
+      // undeclared file too.
+      if (this.snapN > MAX_SAMPLES) this.tooLong(this.snapN);
       this.curT = Number(line.slice(1)) * this.unitPs;
     } else {
       const bit = line[0] === "1" ? 1 : 0;
@@ -194,10 +206,31 @@ export class VcdAccumulator {
     }
   }
 
+  /** Append one value-change group, growing the pair of arrays as needed. */
+  private pushSnap(t: number, byte: number): void {
+    if (this.snapN === this.snapT.length) {
+      const grown = new Float64Array(this.snapT.length * 2);
+      grown.set(this.snapT);
+      this.snapT = grown;
+      const grownB = new Uint8Array(this.snapByte.length * 2);
+      grownB.set(this.snapByte);
+      this.snapByte = grownB;
+    }
+    this.snapT[this.snapN] = t;
+    this.snapByte[this.snapN] = byte;
+    this.snapN++;
+  }
+
+  private tooLong(n: number): never {
+    throw new Error(
+      `VCD declares ${n} samples, over the ${MAX_SAMPLES}-sample import limit.`,
+    );
+  }
+
   finish(): ParsedCapture {
-    if (this.curT >= 0) this.snaps.push({ t: this.curT, byte: this.byte });
-    const snaps = this.snaps;
-    if (snaps.length === 0)
+    if (this.curT >= 0) this.pushSnap(this.curT, this.byte);
+    const n = this.snapN;
+    if (n === 0)
       return { sampleRate: DEFAULT_RATE, samples: new Uint8Array(0) };
 
     // Prefer the exact rate/length from our own $comment; the sample period then
@@ -220,10 +253,13 @@ export class VcdAccumulator {
       total = this.metaSamples;
     } else {
       period = 0;
-      for (const s of snaps) if (s.t > 0) period = gcd(period, s.t);
+      for (let k = 0; k < n; k++) {
+        const t = this.snapT[k];
+        if (t > 0) period = gcd(period, t);
+      }
       const hasRate = period > 0;
       if (!hasRate) period = 1; // only #0 — a single sample
-      total = Math.floor(snaps[snaps.length - 1].t / period) + 1;
+      total = Math.floor(this.snapT[n - 1] / period) + 1;
       sampleRate = hasRate ? Math.round(1e12 / period) : DEFAULT_RATE;
     }
 
@@ -239,13 +275,13 @@ export class VcdAccumulator {
     }
 
     const samples = new Uint8Array(total);
-    for (let k = 0; k < snaps.length; k++) {
-      const start = Math.min(Math.floor(snaps[k].t / period), total);
+    for (let k = 0; k < n; k++) {
+      const start = Math.min(Math.floor(this.snapT[k] / period), total);
       const end =
-        k + 1 < snaps.length
-          ? Math.min(Math.floor(snaps[k + 1].t / period), total)
+        k + 1 < n
+          ? Math.min(Math.floor(this.snapT[k + 1] / period), total)
           : total;
-      samples.fill(snaps[k].byte, start, end);
+      samples.fill(this.snapByte[k], start, end);
     }
     return {
       sampleRate,

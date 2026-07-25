@@ -10,6 +10,7 @@ import {
   rateFromStep,
   DEFAULT_RATE,
   MAX_SAMPLES,
+  VcdAccumulator,
 } from "./parse";
 import { CHANNEL_NAMES } from "../usb/constants";
 
@@ -198,5 +199,20 @@ describe("VCD $timescale spanning lines", () => {
     expect(wrapped.sampleRate).toBe(1_000_000);
     expect(wrapped.sampleRate).toBe(inline.sampleRate);
     expect(wrapped.samples.length).toBe(inline.samples.length);
+  });
+});
+
+describe("VCD import limit", () => {
+  // The cap used to be checked in finish(), i.e. after every change group had
+  // already been materialised on the heap — so it could not prevent the blow-up
+  // it exists for.
+  it("rejects an over-limit declaration as soon as the $comment is read", () => {
+    const acc = new VcdAccumulator();
+    acc.line("$timescale 1 us $end");
+    expect(() =>
+      acc.line(
+        `$comment web-logic-analyzer samplerate=1000000 samples=${MAX_SAMPLES + 1} $end`,
+      ),
+    ).toThrow(/over the .*-sample import limit/);
   });
 });
