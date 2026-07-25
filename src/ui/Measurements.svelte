@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { cursors, captureBuffer } from "../stores/session";
+  import { cursors, captureBuffer, triggerSample } from "../stores/session";
 
   function fmtTime(seconds: number): string {
     const a = Math.abs(seconds);
@@ -16,6 +16,10 @@
   }
 
   let sr = $derived($captureBuffer?.sampleRate ?? 0);
+  // Same origin as the canvas ruler (WaveformCanvas passes triggerSample ?? 0),
+  // so a cursor dropped on the trigger reads 0 instead of its absolute time
+  // while the gutter says "Time (from trigger)".
+  let origin = $derived($triggerSample ?? 0);
   let haveTwo = $derived($cursors.length === 2 && sr > 0);
   let dtSamples = $derived(haveTwo ? Math.abs($cursors[1] - $cursors[0]) : 0);
   let dt = $derived(haveTwo ? dtSamples / sr : 0);
@@ -26,7 +30,7 @@
     <span class="hint">Click the waveform to drop measurement cursors.</span>
   {:else}
     {#each $cursors as c, i (i)}
-      <span class="tag">C{i + 1}: {sr ? fmtTime(c / sr) : c}</span>
+      <span class="tag">C{i + 1}: {sr ? fmtTime((c - origin) / sr) : c}</span>
     {/each}
     {#if haveTwo}
       <span class="tag">Δt: {fmtTime(dt)}</span>
