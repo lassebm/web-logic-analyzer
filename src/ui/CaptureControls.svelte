@@ -247,7 +247,6 @@
 {/if}
 
 <style>
-  /* One cohesive toolbar; items wrap and align on their bottoms. */
   .controls {
     display: flex;
     align-items: flex-end;
@@ -274,7 +273,6 @@
   .counter-field {
     min-width: 260px;
   }
-  /* Uniform label + control heights so everything lines up across the row. */
   .field label,
   .flabel {
     font-size: var(--fs-ui);
@@ -293,7 +291,6 @@
     height: 30px;
     box-sizing: border-box;
   }
-  /* Derived/live readouts (not inputs): plain mono values, no input chrome. */
   .cval {
     display: inline-flex;
     align-items: center;
@@ -303,11 +300,9 @@
     color: var(--fg);
     white-space: nowrap;
   }
-  /* Percent-of-target readout, dimmed so the raw sample counts stay primary. */
   .pct {
     color: var(--fg-dim);
   }
-  /* Boolean setting styled to sit on the same baseline as the select controls. */
   .toggle {
     display: inline-flex;
     align-items: center;
@@ -322,9 +317,7 @@
     margin: 0;
     cursor: pointer;
   }
-  /* Separate the acquisition settings (rate/samples/duration) from the
-     per-channel channel/trigger grid, which is visually busy up close. Stretches
-     to the full row height rather than sitting on the flex-end baseline. */
+  /* Stretches to the full row height instead of sitting on the flex-end baseline. */
   .divider {
     align-self: stretch;
     width: 1px;
@@ -340,8 +333,7 @@
     align-items: center;
     gap: 4px;
   }
-  /* Holds the row title and (for Trigger) its info affordance, right-aligned so
-     the channel/trigger cells below line up. */
+  /* Fixed width so the channel and trigger cells line up across both rows. */
   .rowlabel {
     width: 64px;
     flex: none;
@@ -371,9 +363,7 @@
   .edge {
     padding: 2px;
   }
-  /* Secondary row quick-actions (All/None, Clear) — trailing the cells so the 8
-     channel/trigger columns stay aligned; dim and chrome-less so they don't
-     compete with the chips/selects. */
+  /* Trails the cells so the 8 channel/trigger columns stay aligned. */
   .quick {
     display: inline-flex;
     align-items: center;

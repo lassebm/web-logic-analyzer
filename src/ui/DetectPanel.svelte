@@ -163,9 +163,6 @@
     align-items: flex-start;
     gap: 6px;
   }
-  /* Each card hugs its content with a fixed, comfortable gap to the actions,
-     rather than stretching full-width and dumping all the slack into one void.
-     The info block reserves a min-width so the actions line up across cards. */
   .hit {
     display: flex;
     align-items: center;
@@ -175,6 +172,7 @@
     border-radius: 6px;
     background: var(--bg-elev);
   }
+  /* Reserved width so the actions line up across cards. */
   .info {
     min-width: 160px;
   }
@@ -183,8 +181,6 @@
     align-items: center;
     gap: 10px;
   }
-  /* Plain readable line — "UART on D0" — names protocol and channel without
-     label chrome; weight/colour do the categorising. */
   .title {
     display: flex;
     align-items: baseline;
@@ -224,8 +220,6 @@
     color: var(--warn);
     font-size: var(--fs-ui);
   }
-  /* Secondary, not primary: a repeated per-row action shouldn't shout. Recessed
-     against the elevated card so it still reads as a control; accent on hover. */
   .add {
     flex: none;
     background: var(--bg);

@@ -227,14 +227,11 @@
     box-shadow: var(--shadow-pop);
     min-width: 280px;
   }
-  /* Keep everything in the popover the same size and font. */
   .popover,
   .popover button,
   .popover a {
     font-size: var(--fs-ui);
   }
-  /* Hug the label and left-align rather than stretching full width — matches the
-     Help popover's action button and reads lighter for these short labels. */
   .popover button {
     align-self: flex-start;
   }
@@ -252,7 +249,6 @@
     line-height: 1.4;
     white-space: normal;
   }
-  /* Same link styling in both the empty state and the popover. */
   .fw-link {
     font-size: var(--fs-ui);
     color: var(--accent);

@@ -358,7 +358,6 @@
   .grow {
     flex: 1;
   }
-  /* Enable/disable toggles: the master one in the header, and a per-decoder one. */
   .enable-all,
   .enable {
     display: inline-flex;
@@ -424,7 +423,6 @@
     margin-bottom: 10px;
     background: var(--bg-elev);
   }
-  /* The row being dragged fades; the row it would drop onto gets an accent edge. */
   .inst.dragging {
     opacity: 0.4;
   }

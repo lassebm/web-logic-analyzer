@@ -185,7 +185,6 @@
     height: 20px;
     background: var(--border);
   }
-  /* Activity region pager: a label, prev/next steppers, and a position readout. */
   .activity {
     display: flex;
     align-items: center;

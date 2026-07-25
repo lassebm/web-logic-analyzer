@@ -135,7 +135,6 @@
   .link:hover {
     text-decoration: underline;
   }
-  /* Build provenance: quiet footer, separated from the content above. */
   .build {
     margin-top: 4px;
     padding-top: 8px;
