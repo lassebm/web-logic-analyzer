@@ -4,11 +4,13 @@ import { get } from "svelte/store";
 import { tick } from "svelte";
 import { beforeEach, describe, expect, it } from "vitest";
 import DecoderPanel from "./DecoderPanel.svelte";
-import { decoders, captureBuffer } from "../stores/session";
+import { decoders, captureBuffer, config } from "../stores/session";
+import { defaultConfig } from "../test/fixtures";
 
 beforeEach(() => {
   decoders.set([]);
   captureBuffer.set(null);
+  config.set(defaultConfig());
 });
 
 describe("DecoderPanel", () => {
@@ -56,6 +58,35 @@ describe("DecoderPanel", () => {
     const hint = screen.getByText(/Needs a source that emits byte data/i);
     expect(hint).toBeInTheDocument();
     expect(hint.textContent).toMatch(/UART/);
+  });
+
+  it("says a decoder is idle while a channel it reads is hidden", async () => {
+    decoders.set([
+      {
+        uid: "s1",
+        decoderId: "spi",
+        label: "SPI 1",
+        channelMap: [0, 1, 2, 3],
+        options: {},
+        annotations: [],
+      },
+    ]);
+    config.set(
+      defaultConfig({
+        enabledChannels: [false, true, false, true, true, true, true, true],
+      }),
+    );
+    render(DecoderPanel);
+    await tick();
+    // Both hidden channels named once each, with plural phrasing.
+    const hint = screen.getByText(/hidden — this decoder won't run/i);
+    expect(hint.textContent).toContain("D0, D2 are hidden");
+
+    config.set(defaultConfig());
+    await tick();
+    expect(
+      screen.queryByText(/hidden — this decoder won't run/i),
+    ).not.toBeInTheDocument();
   });
 
   it("removes a decoder instance", async () => {

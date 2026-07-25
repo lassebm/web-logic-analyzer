@@ -70,10 +70,11 @@ succeed.
   trigger + the **Follow** live-view toggle + the Captured/Loaded readout — percent
   of the sample limit during a real capture, a plain total for an imported/demo
   buffer, branched on a `sampleSource`-derived `loaded` flag), `WaveformCanvas` (redraws coalesced to
-  one per animation frame; disabled decoders drop their lanes; manual zoom/pan
-  clears `viewFitsWhole`), `Measurements`,
+  one per animation frame; disabled decoders — and decoders reading a hidden channel —
+  drop their lanes; manual zoom/pan clears `viewFitsWhole`), `Measurements`,
   `DecoderPanel` (add/configure decoders + master and per-decoder enable toggles +
-  drag-handle reorder via `moveDecoder`),
+  drag-handle reorder via `moveDecoder`, and a hint naming the hidden channels that
+  are keeping an instance from running),
   `DetectPanel` (auto-detect results), `ExportMenu`/`ImportMenu` (both show a busy
   progress % while streaming), `SerialMonitor`, `HelpMenu` (top-bar **?** popover
   with "Load demo capture")), plus the shared `InfoTip` (ⓘ
@@ -86,6 +87,9 @@ succeed.
   device and the capture↔monitor mutual-exclusion flag; `detections`/`runDetection`;
   decoder enable/disable — `decodersEnabled` master + per-instance `enabled`,
   `setDecoderEnabled`/`setAllDecodersEnabled` — and decoder reorder `moveDecoder`;
+  channel show/hide `setChannelEnabled`/`setAllChannelsEnabled` (both re-decode, since
+  a hidden channel also stops the decoders reading it — `decoderChannelsShown` is the
+  shared predicate, used by `runAllDecoders` and by `WaveformCanvas` to drop those lanes);
   `runAllDecoders(range?)`; `sampleSource` (capture vs import vs demo) and
   `viewFitsWhole` (the on-screen view is a whole-capture fit); `watchUsbDisconnect` —
   resets state when the device is unplugged; `loadCapture` — swaps in an imported

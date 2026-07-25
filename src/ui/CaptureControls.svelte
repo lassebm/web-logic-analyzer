@@ -9,6 +9,8 @@
     startCapture,
     stopCapture,
     decoderRateWarning,
+    setChannelEnabled,
+    setAllChannelsEnabled,
   } from "../stores/session";
   import {
     SAMPLE_RATES,
@@ -47,21 +49,7 @@
   }
 
   function toggleChannel(ch: number) {
-    config.update((cfg) => {
-      const enabledChannels = [...cfg.enabledChannels];
-      enabledChannels[ch] = !enabledChannels[ch];
-      return { ...cfg, enabledChannels };
-    });
-  }
-
-  // Show/hide every channel at once. "None" then picking a couple is quicker than
-  // deselecting six when you only care about one or two. (This is a view/decode/
-  // export filter — fx2lafw always captures all 8, so it never disables capture.)
-  function setAllChannels(on: boolean) {
-    config.update((cfg) => ({
-      ...cfg,
-      enabledChannels: Array(NUM_CHANNELS).fill(on),
-    }));
+    setChannelEnabled(ch, !$config.enabledChannels[ch]);
   }
 
   function clearTriggers() {
@@ -156,13 +144,13 @@
         <span class="quick">
           <button
             class="qbtn"
-            onclick={() => setAllChannels(true)}
+            onclick={() => setAllChannelsEnabled(true)}
             title="Show all channels">All</button
           >
           <span class="qsep" aria-hidden="true">·</span>
           <button
             class="qbtn"
-            onclick={() => setAllChannels(false)}
+            onclick={() => setAllChannelsEnabled(false)}
             title="Hide all channels (then pick the ones you want)">None</button
           >
         </span>

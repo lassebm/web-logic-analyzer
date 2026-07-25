@@ -474,6 +474,47 @@ export function moveDecoder(uid: string, toIndex: number): void {
   });
 }
 
+/** True when every physical channel a decoder reads is still shown. Stacked
+ *  decoders map no channels, so they pass and follow their source instead. */
+export function decoderChannelsShown(
+  inst: DecoderInstance,
+  enabledChannels: boolean[],
+): boolean {
+  return inst.channelMap.every((ch) => enabledChannels[ch] !== false);
+}
+
+/** Show/hide one capture channel: a view/decode/export filter (fx2lafw always
+ *  streams all 8), so hiding one also stops the decoders reading it. */
+export function setChannelEnabled(ch: number, on: boolean): void {
+  config.update((cfg) => {
+    const enabledChannels = [...cfg.enabledChannels];
+    enabledChannels[ch] = on;
+    return { ...cfg, enabledChannels };
+  });
+  onChannelsChanged();
+}
+
+/** Show/hide every channel at once. */
+export function setAllChannelsEnabled(on: boolean): void {
+  config.update((cfg) => ({
+    ...cfg,
+    enabledChannels: Array(NUM_CHANNELS).fill(on),
+  }));
+  onChannelsChanged();
+}
+
+// Clear the lanes that just lost their channel — refreshDecoders is a no-op
+// mid-capture, so waiting for the re-decode would leave them showing.
+function onChannelsChanged(): void {
+  const enabled = get(config).enabledChannels;
+  decoders.update((list) =>
+    list.map((d) =>
+      decoderChannelsShown(d, enabled) ? d : { ...d, annotations: [] },
+    ),
+  );
+  refreshDecoders();
+}
+
 /** Enable/disable a single decoder (both live and on stop), refreshing results. */
 export function setDecoderEnabled(uid: string, on: boolean): void {
   decoders.update((list) =>
@@ -524,10 +565,14 @@ export function runAllDecoders(range?: { start: number; end: number }): void {
   if (!buf || buf.sampleCount === 0) return;
   const list = get(decoders);
   const packetsByUid = new Map<string, Packet[]>();
-  // A decoder runs only when the master switch and its own flag are both on;
-  // disabled decoders are cleared (no annotations, no packets for stacking).
+  // A decoder runs only with the master switch on, its own flag on, and every
+  // channel it reads shown; the rest are cleared (no annotations, no packets).
   const masterOn = get(decodersEnabled);
-  const active = (inst: DecoderInstance) => masterOn && inst.enabled !== false;
+  const enabledChannels = get(config).enabledChannels;
+  const active = (inst: DecoderInstance) =>
+    masterOn &&
+    inst.enabled !== false &&
+    decoderChannelsShown(inst, enabledChannels);
 
   // Pass 1: logic decoders (produce annotations + packets).
   const afterLogic = list.map((inst) => {

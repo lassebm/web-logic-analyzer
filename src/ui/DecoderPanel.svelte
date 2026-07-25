@@ -9,6 +9,7 @@
     setAllDecodersEnabled,
     decodersEnabled,
     config,
+    type DecoderInstance,
   } from "../stores/session";
   import { DECODERS, getDecoder } from "../decode/registry";
   import { CHANNEL_NAMES, NUM_CHANNELS } from "../usb/constants";
@@ -103,6 +104,19 @@
     const def = dec.meta.options.find((o) => o.id === id)!;
     const coerced = typeof def.default === "number" ? Number(value) : value;
     updateDecoder(uid, { options: { ...inst.options, [id]: coerced } });
+  }
+
+  function hiddenHint(inst: DecoderInstance): string | null {
+    // `=== false` to match decoderChannelsShown, so the notice can't claim a
+    // decoder is idle while the store still runs it.
+    const hidden = inst.channelMap.filter(
+      (ch) => $config.enabledChannels[ch] === false,
+    );
+    const names = [...new Set(hidden)].map((ch) => CHANNEL_NAMES[ch]);
+    if (names.length === 0) return null;
+    const [verb, pronoun] =
+      names.length > 1 ? ["are", "they're"] : ["is", "it's"];
+    return `${names.join(", ")} ${verb} hidden — this decoder won't run until ${pronoun} shown in Channels.`;
   }
 
   // Instances that emit the packet type a stacked decoder consumes.
@@ -217,6 +231,10 @@
             >Remove</button
           >
         </div>
+
+        {#if hiddenHint(inst)}
+          <p class="chan-warn" role="status">{hiddenHint(inst)}</p>
+        {/if}
 
         <div class="rows">
           {#if dec.meta.inputType}
@@ -422,6 +440,16 @@
     padding: 8px 10px;
     margin-bottom: 10px;
     background: var(--bg-elev);
+  }
+  .chan-warn {
+    margin: 0 0 8px;
+    padding: 5px 8px;
+    border: 1px solid var(--warn);
+    border-radius: 6px;
+    background: var(--warn-bg);
+    color: var(--warn);
+    font-size: var(--fs-ui);
+    line-height: 1.4;
   }
   .inst.dragging {
     opacity: 0.4;

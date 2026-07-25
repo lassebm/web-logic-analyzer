@@ -11,6 +11,7 @@
     config,
     viewportWidth,
     viewFitsWhole,
+    decoderChannelsShown,
   } from "../stores/session";
   import { getDecoder } from "../decode/registry";
   import {
@@ -30,7 +31,7 @@
 
   // Build the ordered list of rows (channels first, then decoder lanes). Disabled
   // decoders (master off, or their own toggle off) drop out so you can focus on
-  // a subset.
+  // a subset, and so do decoders reading a hidden channel.
   let rows = $derived(
     buildRows($config.enabledChannels, $decoders, $decodersEnabled),
   );
@@ -57,6 +58,7 @@
       const dec = getDecoder(inst.decoderId);
       if (!dec) return;
       if (!decodersOn || inst.enabled === false) return; // disabled -> no lanes
+      if (!decoderChannelsShown(inst, enabled)) return; // channel hidden -> no lanes
       dec.meta.annotationRows.forEach((ar, ri) => {
         const anns = inst.annotations.filter((a) =>
           ar.classes.includes(a.annClass),

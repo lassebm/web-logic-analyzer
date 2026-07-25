@@ -75,6 +75,38 @@ describe("WaveformCanvas", () => {
     expect(screen.getByText("D1")).toBeInTheDocument();
   });
 
+  it("drops the lanes of a decoder whose channel is hidden", async () => {
+    decoders.set([
+      {
+        uid: "d1",
+        decoderId: "uart",
+        label: "UART 1",
+        channelMap: [0],
+        options: {},
+        annotations: [],
+      },
+      {
+        uid: "d2",
+        decoderId: "uart",
+        label: "RX bus",
+        channelMap: [1],
+        options: {},
+        annotations: [],
+      },
+    ]);
+    config.set(
+      defaultConfig({
+        enabledChannels: [false, true, true, true, true, true, true, true],
+      }),
+    );
+    render(WaveformCanvas);
+    await tick();
+
+    // D0 is hidden, so the decoder reading it loses its lanes; the D1 one stays.
+    expect(screen.queryByText("UART 1:Data")).not.toBeInTheDocument();
+    expect(screen.getByText("RX bus:Data")).toBeInTheDocument();
+  });
+
   it("pans on a horizontal (two-finger) wheel with no modifier", async () => {
     captureBuffer.set(idleBuffer());
     view.set({ viewStart: 0, samplesPerPixel: 2 });

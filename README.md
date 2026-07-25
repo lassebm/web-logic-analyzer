@@ -52,7 +52,8 @@ for you.
 - **WebUSB connection** — automatic firmware upload and re-enumeration, and it notices
   when the device is unplugged and resets cleanly.
 - **Configurable capture** — sample rate (20 kHz–24 MHz), active channels, sample count
-  (10k up to 100M for long captures).
+  (10k up to 100M for long captures). Hiding a channel takes it out of the view, the
+  exports, and any decoder reading it.
 - **Software trigger** — per-channel rising/falling/level, matching sigrok's model (the
   FX2 has no hardware trigger, so it's done client-side).
 - **Waveform viewer** — 8 channels, trigger-relative time ruler, zoom (Ctrl/⌘+wheel) and

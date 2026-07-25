@@ -11,8 +11,13 @@ import {
   setAllDecodersEnabled,
   runAllDecoders,
   decodersEnabled,
+  setChannelEnabled,
+  setAllChannelsEnabled,
+  config,
+  captureStatus,
 } from "./session";
 import { packLevels, uartFrame, uartFrameLevels } from "../test/waveforms";
+import { defaultConfig } from "../test/fixtures";
 
 const ANN_DATA = 6; // UART data-byte annotation class
 
@@ -41,6 +46,8 @@ beforeEach(() => {
   captureBuffer.set(null);
   decoders.set([]);
   decodersEnabled.set(true);
+  config.set(defaultConfig());
+  captureStatus.set("idle");
 });
 
 describe("session decoder orchestration", () => {
@@ -203,6 +210,83 @@ describe("session decoder orchestration", () => {
 
     moveDecoder("nope", 0); // unknown uid leaves the order untouched
     expect(get(decoders).map((d) => d.uid)).toEqual([d1.uid, d0.uid]);
+  });
+
+  it("hiding a channel stops the decoders reading it, and only those", () => {
+    captureBuffer.set(buildTwoChannelUart(0x41, 0x42)); // 'A' on ch0, 'B' on ch1
+    addDecoder("uart"); // ch0
+    addDecoder("uart");
+    const [d0, d1] = get(decoders);
+    updateDecoder(d1.uid, { channelMap: [1] });
+    const byUid = (uid: string) => get(decoders).find((d) => d.uid === uid)!;
+    expect(byUid(d0.uid).annotations.length).toBeGreaterThan(0);
+
+    setChannelEnabled(0, false);
+    expect(byUid(d0.uid).annotations.length).toBe(0); // reads the hidden D0
+    expect(byUid(d1.uid).annotations.length).toBeGreaterThan(0); // untouched
+
+    setChannelEnabled(0, true);
+    expect(byUid(d0.uid).annotations.length).toBeGreaterThan(0); // decodes again
+  });
+
+  it("clears a lost channel's lanes mid-capture, where no re-decode follows", () => {
+    captureBuffer.set(buildUart(0x41));
+    addDecoder("uart");
+    expect(get(decoders)[0].annotations.length).toBeGreaterThan(0);
+
+    // While capturing, the full decode is skipped (the live in-view pass owns
+    // it), so the toggle itself has to drop the stale annotations.
+    captureStatus.set("running");
+    setChannelEnabled(0, false);
+    expect(get(decoders)[0].annotations.length).toBe(0);
+  });
+
+  it("hiding every channel stops every decoder; All restores them", () => {
+    captureBuffer.set(buildTwoChannelUart(0x41, 0x42));
+    addDecoder("uart");
+    addDecoder("uart");
+    updateDecoder(get(decoders)[1].uid, { channelMap: [1] });
+
+    setAllChannelsEnabled(false);
+    expect(get(decoders).every((d) => d.annotations.length === 0)).toBe(true);
+    // The decoders themselves stay enabled — only their channels went away.
+    expect(get(decoders).every((d) => d.enabled)).toBe(true);
+
+    setAllChannelsEnabled(true);
+    expect(get(decoders).every((d) => d.annotations.length > 0)).toBe(true);
+  });
+
+  it("a stacked decoder goes quiet when its source's channel is hidden", () => {
+    captureBuffer.set(buildUart(0x41)); // 'A'
+    addDecoder("uart");
+    addDecoder("ascii");
+    const asciiUid = get(decoders).find((d) => d.decoderId === "ascii")!.uid;
+    const asciiAnns = () =>
+      get(decoders).find((d) => d.uid === asciiUid)!.annotations;
+    expect(asciiAnns().length).toBeGreaterThan(0);
+
+    // It maps no channels itself — it stops because its source stops emitting.
+    setChannelEnabled(0, false);
+    expect(asciiAnns().length).toBe(0);
+
+    setChannelEnabled(0, true);
+    expect(asciiAnns().length).toBeGreaterThan(0);
+  });
+
+  it("a decoder on a hidden channel is skipped in a live in-view pass too", () => {
+    captureBuffer.set(buildTwoChannelUart(0x41, 0x42)); // 'A' on ch0, 'B' on ch1
+    addDecoder("uart"); // ch0
+    addDecoder("uart");
+    const [d0, d1] = get(decoders);
+    updateDecoder(d1.uid, { channelMap: [1] });
+    setChannelEnabled(1, false);
+
+    const n = get(captureBuffer)!.sampleCount;
+    runAllDecoders({ start: 0, end: n }); // windowed (live) pass
+
+    const byUid = (uid: string) => get(decoders).find((d) => d.uid === uid)!;
+    expect(byUid(d0.uid).annotations.length).toBeGreaterThan(0);
+    expect(byUid(d1.uid).annotations.length).toBe(0);
   });
 
   it("a disabled decoder is skipped in a live in-view pass too", () => {
