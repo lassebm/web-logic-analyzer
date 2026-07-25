@@ -444,19 +444,33 @@ export function addDecoder(
     stackOnUid = src?.uid;
   }
 
-  decoders.update((list) => [
-    ...list,
-    {
-      uid: `dec${uidCounter++}`,
-      decoderId,
-      label,
-      channelMap,
-      options,
-      annotations: [],
-      stackOnUid,
-      enabled: true,
-    },
-  ]);
+  const uid = `dec${uidCounter++}`;
+  decoders.update((list) => {
+    const next = [
+      ...list,
+      {
+        uid,
+        decoderId,
+        label,
+        channelMap,
+        options,
+        annotations: [],
+        stackOnUid,
+        enabled: true,
+      },
+    ];
+    // Adding a source late: a stacked decoder added first had nothing to bind
+    // to, and nothing re-checked afterwards — its Source select rendered blank
+    // (no option matches "") and it decoded nothing until the user re-picked.
+    if (!dec.meta.outputType) return next;
+    return next.map((inst) => {
+      if (inst.uid === uid || inst.stackOnUid) return inst;
+      const d = getDecoder(inst.decoderId);
+      return d?.meta.inputType === dec.meta.outputType
+        ? { ...inst, stackOnUid: uid }
+        : inst;
+    });
+  });
   runAllDecoders();
 }
 

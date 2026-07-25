@@ -69,6 +69,17 @@ describe("session decoder orchestration", () => {
     expect(text).toContain("A");
   });
 
+  it("binds a stacked decoder added before its source, once one exists", () => {
+    captureBuffer.set(buildUart(0x41)); // 'A'
+    addDecoder("ascii"); // nothing to stack on yet
+    expect(get(decoders)[0].stackOnUid).toBeUndefined();
+
+    addDecoder("uart");
+    const [ascii, uart] = get(decoders);
+    expect(ascii.stackOnUid).toBe(uart.uid);
+    expect(ascii.annotations.map((a) => a.texts[0]).join("")).toContain("A");
+  });
+
   it("runs multiple independent logic decoders, each on its own channel", () => {
     captureBuffer.set(buildTwoChannelUart(0x41, 0x42)); // 'A' on ch0, 'B' on ch1
     addDecoder("uart"); // defaults to channel 0
