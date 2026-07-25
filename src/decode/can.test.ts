@@ -159,3 +159,34 @@ describe("can decoder", () => {
     expect(bytes).toEqual(["0x55"]);
   });
 });
+describe("can annotation placement", () => {
+  const ANN_RTR = 2;
+  // The frame starts at sample 30 (the idle preamble) — see buildCanStdFrame.
+  const FRAME_START = 30;
+
+  // Field boundaries used to be taken from ctx.samplenum, the *centre* of the
+  // last bit read, so every box sat half a bit early; when readBit had just
+  // swallowed a stuff bit at a field boundary it was a whole bit off, drawing the
+  // RTR box over the stuff bit.
+  it("aligns field annotations to whole bit cells", () => {
+    const spb = 10;
+    const buf = buildCanStdFrame(0x01f, [0x11], spb);
+    const { annotations } = runDecoder(canDecoder, buf, [0], {
+      bitrate: buf.sampleRate / spb,
+    });
+
+    const one = (cls: number) => annotations.find((a) => a.annClass === cls)!;
+    const id = one(ANN_ID);
+    const rtr = one(ANN_RTR);
+
+    // Every boundary lands on a bit-cell edge relative to the frame start.
+    for (const a of [id, rtr, one(ANN_DLC), one(ANN_DATA)]) {
+      expect((a.startSample - FRAME_START) % spb).toBe(0);
+      expect((a.endSample - FRAME_START) % spb).toBe(0);
+    }
+    // The ID field starts one bit cell after SOF and RTR follows it directly.
+    expect(id.startSample).toBe(FRAME_START + spb);
+    expect(rtr.startSample).toBe(id.endSample);
+    expect(rtr.endSample - rtr.startSample).toBe(spb);
+  });
+});

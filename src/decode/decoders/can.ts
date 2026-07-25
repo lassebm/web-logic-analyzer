@@ -109,6 +109,11 @@ export const canDecoder: Decoder = {
         return b;
       };
 
+      // Boundaries come from raw bit indices, not ctx.samplenum: samplenum is
+      // the *centre* of the last bit read, so boxes sat half a bit early — a
+      // whole bit when readBit had just swallowed a stuff bit.
+      const cell = (rawIdx: number) => Math.round(s0 + spb * rawIdx);
+
       const sof = yield* readBit();
       ctx.put(s0, Math.round(s0 + spb), ANN_SOF, ["SOF", "S"]);
       if (sof !== 0) {
@@ -120,11 +125,12 @@ export const canDecoder: Decoder = {
       }
 
       // Base identifier (11 bits, MSB-first).
-      const idStart = ctx.samplenum;
+      const idStartBit = rawBitIndex;
       let id = 0;
       for (let i = 0; i < 11; i++) id = (id << 1) | (yield* readBit());
-      let idEnd = ctx.samplenum;
+      let idEndBit = rawBitIndex;
 
+      let rtrBit = rawBitIndex;
       let rtr = yield* readBit(); // RTR (base) or SRR (extended)
       const ide = yield* readBit(); // 0 = standard, 1 = extended
       let extended = false;
@@ -134,7 +140,8 @@ export const canDecoder: Decoder = {
         let ext = 0;
         for (let i = 0; i < 18; i++) ext = (ext << 1) | (yield* readBit());
         id = id * (1 << 18) + ext;
-        idEnd = ctx.samplenum;
+        idEndBit = rawBitIndex;
+        rtrBit = rawBitIndex;
         rtr = yield* readBit(); // real RTR
         yield* readBit(); // r1
         yield* readBit(); // r0
@@ -142,39 +149,41 @@ export const canDecoder: Decoder = {
         yield* readBit(); // r0
       }
 
-      ctx.put(idStart, idEnd, ANN_ID, [
+      ctx.put(cell(idStartBit), cell(idEndBit), ANN_ID, [
         `ID ${hex(id, 0)}${extended ? " ext" : ""}`,
         hex(id, 0),
       ]);
-      ctx.put(idEnd, Math.round(idEnd + spb), ANN_RTR, [
+      ctx.put(cell(rtrBit), cell(rtrBit + 1), ANN_RTR, [
         rtr ? "RTR" : "Data",
         rtr ? "R" : "D",
       ]);
-      ctx.put(idStart, idEnd, ANN_IDE, [extended ? "Ext" : "Std"]);
+      ctx.put(cell(idStartBit), cell(idEndBit), ANN_IDE, [
+        extended ? "Ext" : "Std",
+      ]);
 
       // DLC (4 bits).
-      const dlcStart = ctx.samplenum;
+      const dlcStartBit = rawBitIndex;
       let dlc = 0;
       for (let i = 0; i < 4; i++) dlc = (dlc << 1) | (yield* readBit());
-      ctx.put(dlcStart, ctx.samplenum, ANN_DLC, [`DLC ${dlc}`]);
+      ctx.put(cell(dlcStartBit), cell(rawBitIndex), ANN_DLC, [`DLC ${dlc}`]);
       const nbytes = Math.min(dlc, 8);
 
       // Data bytes (data frames only).
       if (rtr === 0) {
         for (let n = 0; n < nbytes; n++) {
           let v = 0;
-          const bstart = ctx.samplenum;
+          const bStartBit = rawBitIndex;
           for (let i = 0; i < 8; i++) v = (v << 1) | (yield* readBit());
-          ctx.put(bstart, ctx.samplenum, ANN_DATA, [hex(v)]);
-          ctx.emit(bstart, ctx.samplenum, "byte", { value: v });
+          ctx.put(cell(bStartBit), cell(rawBitIndex), ANN_DATA, [hex(v)]);
+          ctx.emit(cell(bStartBit), cell(rawBitIndex), "byte", { value: v });
         }
       }
 
       // CRC (15 bits, still stuffed).
       let crc = 0;
-      const crcStart = ctx.samplenum;
+      const crcStartBit = rawBitIndex;
       for (let i = 0; i < 15; i++) crc = (crc << 1) | (yield* readBit());
-      ctx.put(crcStart, ctx.samplenum, ANN_CRC, [
+      ctx.put(cell(crcStartBit), cell(rawBitIndex), ANN_CRC, [
         `CRC ${hex(crc, 0)}`,
         hex(crc, 0),
       ]);
