@@ -4,7 +4,13 @@ import { tick } from "svelte";
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it } from "vitest";
 import WaveformCanvas from "./WaveformCanvas.svelte";
-import { decoders, captureBuffer, config, view } from "../stores/session";
+import {
+  decoders,
+  captureBuffer,
+  config,
+  view,
+  cursors,
+} from "../stores/session";
 import { CaptureBuffer } from "../model/capture";
 import { defaultConfig } from "../test/fixtures";
 
@@ -105,6 +111,37 @@ describe("WaveformCanvas", () => {
     // D0 is hidden, so the decoder reading it loses its lanes; the D1 one stays.
     expect(screen.queryByText("UART 1:Data")).not.toBeInTheDocument();
     expect(screen.getByText("RX bus:Data")).toBeInTheDocument();
+  });
+
+  // placeCursor and its two-cursor ring had no coverage: Measurements.test.ts
+  // sets `cursors` directly, so click-to-measure was never exercised.
+  it("places measurement cursors on click and cycles the pair", async () => {
+    // jsdom has no pointer capture; the handler calls it unconditionally.
+    (
+      Element.prototype as unknown as Record<string, unknown>
+    ).setPointerCapture ??= () => {};
+    captureBuffer.set(idleBuffer());
+    cursors.set([]);
+    view.set({ viewStart: 0, samplesPerPixel: 1 });
+    const { container } = render(WaveformCanvas);
+    await tick();
+    const canvas = container.querySelector("canvas")!;
+
+    // A rect of zeros in jsdom means clientX maps straight to the sample index.
+    const click = async (x: number) => {
+      await fireEvent.pointerDown(canvas, { clientX: x, pointerId: 1 });
+      await fireEvent.pointerUp(canvas, { clientX: x, pointerId: 1 });
+    };
+
+    await click(10);
+    expect(get(cursors)).toEqual([10]);
+    await click(20);
+    expect(get(cursors)).toEqual([10, 20]);
+    // Third click replaces the oldest, so the pair keeps moving.
+    await click(30);
+    expect(get(cursors)).toEqual([30, 20]);
+    await click(40);
+    expect(get(cursors)).toEqual([30, 40]);
   });
 
   it("pans on a horizontal (two-finger) wheel with no modifier", async () => {
