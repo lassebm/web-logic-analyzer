@@ -130,6 +130,15 @@ describe("session decoder orchestration", () => {
     expect(inst.options.data_bits).toBe(8); // unspecified options keep their defaults
   });
 
+  // A short channelMap used to leave holes that ctx.pin() read as physical
+  // channel 0: the demo's SPI entry maps only clk/mosi/miso, so switching its
+  // chip select on made it sample D0 (the UART line) instead of failing.
+  it("pads a short channelMap override to one entry per declared channel", () => {
+    captureBuffer.set(buildUart(0x41));
+    addDecoder("spi", { channelMap: [1, 2, 3] }); // 4-channel decoder, 3 given
+    expect(get(decoders)[0].channelMap).toEqual([1, 2, 3, 3]);
+  });
+
   it("re-decodes when options change and supports removal", () => {
     captureBuffer.set(buildUart(0x41));
     addDecoder("uart");

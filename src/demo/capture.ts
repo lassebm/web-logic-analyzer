@@ -39,7 +39,13 @@ export const DEMO_DECODERS: Array<{
   // Stacked on the UART above (auto-wired by loadDemo, since it is added right
   // after): turns the UART bytes into readable text ("Hello\n").
   { decoderId: "ascii", channelMap: [], options: {} },
-  { decoderId: "spi", channelMap: [1, 2, 3], options: { cs_polarity: "none" } },
+  // No CS wire in the demo (cs_polarity "none"), but every declared channel gets
+  // an entry — an unmapped one would read as physical channel 0, the UART line.
+  {
+    decoderId: "spi",
+    channelMap: [1, 2, 3, 3],
+    options: { cs_polarity: "none" },
+  },
   { decoderId: "i2c", channelMap: [4, 5], options: {} },
   { decoderId: "onewire", channelMap: [6], options: {} },
   { decoderId: "can", channelMap: [7], options: { bitrate: 100000 } },

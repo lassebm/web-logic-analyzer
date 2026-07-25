@@ -422,8 +422,12 @@ export function addDecoder(
   const options: Record<string, string | number> = {};
   for (const o of dec.meta.options) options[o.id] = o.default;
   if (overrides?.options) Object.assign(options, overrides.options);
-  const channelMap =
-    overrides?.channelMap ?? dec.meta.channels.map((_, i) => i); // default D0..Dn
+  // One entry per declared channel, always. A short override would leave holes
+  // that ctx.pin() reads as `>> undefined`, i.e. silently physical channel 0 —
+  // so an unmapped logical channel falls back to its own index (D0..Dn).
+  const channelMap = dec.meta.channels.map(
+    (_, i) => overrides?.channelMap?.[i] ?? i,
+  );
 
   // Auto-number so multiple instances of one type are distinguishable (e.g. two
   // UARTs for RX/TX); the user can rename freely afterwards.
