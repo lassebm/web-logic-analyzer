@@ -150,6 +150,10 @@ export class VcdAccumulator {
   // A $timescale whose magnitude/unit sit on following lines (common from
   // simulators and GTKWave); without this the unit silently defaulted to ps.
   private inTimescale = false;
+  // Whether any value change followed the current timestamp. A trailing bare
+  // timestamp (our exporter's end marker, and a common convention) bounds the
+  // capture rather than being a sample of its own.
+  private changedSinceT = false;
 
   /** Reads "1 ns" / "1ns" from a $timescale section line. True once found. */
   private readTimescale(text: string): boolean {
@@ -193,14 +197,17 @@ export class VcdAccumulator {
     }
     if (line === "") return;
     if (line[0] === "#") {
-      if (this.curT >= 0) this.pushSnap(this.curT, this.byte);
+      if (this.curT >= 0 && this.changedSinceT)
+        this.pushSnap(this.curT, this.byte);
       // A file cannot hold more change groups than samples, so this bounds an
       // undeclared file too.
       if (this.snapN > MAX_SAMPLES) this.tooLong(this.snapN);
       this.curT = Number(line.slice(1)) * this.unitPs;
+      this.changedSinceT = false;
     } else {
       const bit = line[0] === "1" ? 1 : 0;
       const ch = this.idToChannel.get(line.slice(1));
+      this.changedSinceT = true;
       if (ch !== undefined)
         this.byte = bit ? this.byte | (1 << ch) : this.byte & ~(1 << ch);
     }
@@ -228,7 +235,12 @@ export class VcdAccumulator {
   }
 
   finish(): ParsedCapture {
-    if (this.curT >= 0) this.pushSnap(this.curT, this.byte);
+    // An unterminated final group is a sample; a bare end marker is the bound.
+    let endT = -1;
+    if (this.curT >= 0) {
+      if (this.changedSinceT) this.pushSnap(this.curT, this.byte);
+      else endT = this.curT;
+    }
     const n = this.snapN;
     if (n === 0)
       return { sampleRate: DEFAULT_RATE, samples: new Uint8Array(0) };
@@ -259,7 +271,10 @@ export class VcdAccumulator {
       }
       const hasRate = period > 0;
       if (!hasRate) period = 1; // only #0 — a single sample
-      total = Math.floor(this.snapT[n - 1] / period) + 1;
+      total =
+        endT >= 0
+          ? Math.floor(endT / period)
+          : Math.floor(this.snapT[n - 1] / period) + 1;
       sampleRate = hasRate ? Math.round(1e12 / period) : DEFAULT_RATE;
     }
 

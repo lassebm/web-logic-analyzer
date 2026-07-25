@@ -216,3 +216,23 @@ describe("VCD import limit", () => {
     ).toThrow(/over the .*-sample import limit/);
   });
 });
+describe("VCD length without our $comment", () => {
+  // The GCD fallback counted the trailing end-timestamp marker as a sample, so a
+  // 10-sample export re-imported as 11 with a phantom repeat of the last value.
+  // A final timestamp with no value changes after it bounds the capture instead.
+  it("does not count a bare end marker as a sample", () => {
+    const buf = new CaptureBuffer(1_000_000, 10);
+    const levels = new Uint8Array([1, 1, 1, 0, 0, 1, 1, 1, 1, 1]);
+    buf.append(levels);
+    const full = toVcd(buf, [0]);
+    const noComment = full
+      .split("\n")
+      .filter((l) => !l.startsWith("$comment"))
+      .join("\n");
+
+    const fallback = parseVcd(noComment);
+    expect(fallback.sampleRate).toBe(1_000_000);
+    expect(fallback.samples.length).toBe(10);
+    expect([...fallback.samples]).toEqual([...levels]);
+  });
+});
