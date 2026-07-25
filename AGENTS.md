@@ -35,8 +35,8 @@ succeed.
 - `usb/` — WebUSB layer: `constants.ts` (protocol facts), `fx2Device.ts` (device
   wrapper), `firmware.ts` (detect + upload + re-enumerate), `firmwareStore.ts`
   (custom-firmware IndexedDB cache), `capture.ts` (bulk streaming with an
-  in-flight transfer queue, the `stallTimeout` watchdog on a dead stream, plus the
-  pre-capture firmware-version/rev-id probe),
+  in-flight transfer queue sized by `transferPlan`, the `stallTimeout` watchdog on
+  a dead stream, plus the pre-capture firmware-version/rev-id probe),
   `sampleRate.ts` (rate ↔ FX2 clock-divider `encodeSampleRate`, the supported-rate
   table `SAMPLE_RATES` (20 kHz–24 MHz), `formatSampleRate`, and the USB-bandwidth
   guard `bandwidthWarning` / `SUSTAINED_USB_BYTES_PER_SEC` (30 MB/s)).
@@ -162,7 +162,11 @@ succeed.
 - **No hardware trigger** — the FX2 streams continuously; triggering is done in
   software (`model/trigger.ts`), matching sigrok.
 - **Keep multiple bulk transfers in flight** during capture (`capture.ts`); a
-  single-transfer loop stalls the FX2 FIFO after one buffer (~65536 samples).
+  single-transfer loop stalls the FX2 FIFO after one buffer. Size the queue with
+  the rate — `transferPlan()` follows libsigrok (≈10 ms per buffer, ≈500 ms of
+  capture queued, ≤32 transfers) — because the queue _is_ the tolerance for a busy
+  main thread: a fixed 8 × 64 KB is only 21 ms of slack at 24 MHz, so one slow
+  frame ends the capture.
 - **A dead stream never comes back, and a quiet endpoint never settles.** Once the
   host falls behind — the page blocked by a modal prompt (the `beforeunload`
   confirmation!), a suspended machine — the FIFO overflows and fx2lafw stops

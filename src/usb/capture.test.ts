@@ -4,9 +4,10 @@ import {
   getFirmwareVersion,
   getRevId,
   stallTimeout,
+  transferPlan,
 } from "./capture";
 import { CMD_START } from "./constants";
-import { encodeSampleRate } from "./sampleRate";
+import { encodeSampleRate, SAMPLE_RATES } from "./sampleRate";
 import { Fx2Device } from "./fx2Device";
 import { FakeUSBDevice } from "../test/fakeUsb";
 
@@ -253,6 +254,31 @@ describe("CaptureSession", () => {
 
   // fx2lafw needs several transfers queued at once; a single-transfer loop lets
   // the FX2 FIFO overflow between reads and stalls the stream after one buffer.
+  it("sizes its transfers from the rate when not told otherwise", async () => {
+    const lengths: number[] = [];
+    const dev = {
+      async claim() {},
+      async controlOut() {},
+      async readBulk(length: number): Promise<USBInTransferResult> {
+        lengths.push(length);
+        return {
+          status: "ok",
+          data: new DataView(new Uint8Array(1000).buffer),
+        } as USBInTransferResult;
+      },
+      async reset() {},
+    };
+    const session = new CaptureSession(
+      dev as unknown as Fx2Device,
+      { sampleRate: 24_000_000, sampleLimit: 1000 },
+      { onData: () => {} },
+    );
+
+    await session.run();
+
+    expect(lengths[0]).toBe(transferPlan(24_000_000).transferSize);
+  });
+
   it("keeps transferDepth transfers in flight while streaming", async () => {
     const dev = makeDepthProbeDevice(100);
     const session = new CaptureSession(
@@ -340,6 +366,36 @@ describe("CaptureSession", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/no sample data/i);
     expect(dev.resetCalls).toBe(1);
+  });
+});
+
+describe("transferPlan", () => {
+  /** Capture time the queue can absorb while the main thread is busy. */
+  const queueMs = (rate: number) => {
+    const { transferSize, depth } = transferPlan(rate);
+    return (transferSize * depth) / (rate / 1000);
+  };
+
+  it("buys enough queue at 24 MHz to survive a busy main thread", () => {
+    // The old fixed 8 x 64 KB was 21 ms — one slow frame killed the stream.
+    expect(queueMs(24_000_000)).toBeGreaterThan(250);
+    const { transferSize, depth } = transferPlan(24_000_000);
+    expect(transferSize % 512).toBe(0);
+    expect(depth).toBeLessThanOrEqual(32); // libsigrok's NUM_SIMUL_TRANSFERS
+  });
+
+  it("keeps a comparable cushion across the rate table", () => {
+    for (const rate of SAMPLE_RATES) {
+      expect(queueMs(rate)).toBeGreaterThan(200);
+      expect(transferPlan(rate).transferSize % 512).toBe(0);
+    }
+  });
+
+  it("honours an explicit transfer size and derives the depth from it", () => {
+    // What the serial monitor does: small reads for latency, still deeply queued.
+    const { transferSize, depth } = transferPlan(1_000_000, 8 * 1024);
+    expect(transferSize).toBe(8 * 1024);
+    expect(depth).toBeGreaterThan(8);
   });
 });
 

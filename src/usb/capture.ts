@@ -42,12 +42,49 @@ export interface CaptureConfig {
   sampleRate: number;
   /** Total samples (bytes, in 8-bit mode) to collect before auto-stopping. */
   sampleLimit: number;
-  /** Bulk transfer size in bytes; must be a multiple of 512. */
+  /** Bulk transfer size in bytes; must be a multiple of 512. Defaults to
+   *  `transferPlan()`, which scales it with the sample rate. */
   transferSize?: number;
-  /** Number of bulk transfers to keep in flight (default 8). */
+  /** Number of bulk transfers to keep in flight; defaults to `transferPlan()`. */
   transferDepth?: number;
   /** Silence (ms) that counts as a dead stream; defaults to `stallTimeout()`. */
   stallTimeoutMs?: number;
+}
+
+/** Samples (in ms of capture time) one bulk transfer should hold. */
+const TRANSFER_MS = 10;
+/** Capture time the whole in-flight queue should absorb. */
+const QUEUE_MS = 500;
+/** Cap on queued transfers, matching libsigrok's NUM_SIMUL_TRANSFERS. */
+const MAX_TRANSFER_DEPTH = 32;
+
+/**
+ * Bulk transfer size and queue depth for a sample rate — libsigrok's fx2lafw
+ * sizing: each buffer holds ~10 ms of samples, and the queue ~500 ms in total.
+ *
+ * The queue length *is* the app's tolerance for a busy main thread. The FX2 has
+ * no flow control: the moment the host stops draining the endpoint, its FIFO
+ * overflows and the stream is dead for good (no restart, see run()). Only queued
+ * transfers keep draining while JS is busy rendering, decoding or in GC — and a
+ * fixed 8 × 64 KB is just 21 ms of slack at 24 MHz, so a single slow frame ends
+ * the capture. Scaled, 24 MHz gets ~235 KB × 32 ≈ 320 ms.
+ *
+ * An explicit `transferSize` (the serial monitor wants small, low-latency reads)
+ * is honoured, with the depth then derived from it.
+ */
+export function transferPlan(
+  sampleRate: number,
+  transferSize?: number,
+): { transferSize: number; depth: number } {
+  const bytesPerMs = sampleRate / 1000; // 8-bit mode: one byte per sample
+  const size =
+    transferSize ??
+    Math.max(512, Math.ceil((bytesPerMs * TRANSFER_MS) / 512) * 512);
+  const depth = Math.round((bytesPerMs * QUEUE_MS) / size);
+  return {
+    transferSize: size,
+    depth: Math.min(MAX_TRANSFER_DEPTH, Math.max(2, depth)),
+  };
 }
 
 /** Floor for the stall timeout, so fast rates still get a little slack. */
@@ -75,7 +112,7 @@ export function stallTimeout(transferSize: number, sampleRate: number): number {
 const TIMED_OUT = Symbol("stalled");
 
 const STALL_MESSAGE =
-  "The device stopped sending samples — the stream can't resume once the page is blocked mid-capture (by a reload prompt, say). Press Run to capture again.";
+  "The device stopped sending samples, and the FX2 cannot resume a stalled stream. Usually the sample rate is more than the USB link can sustain — try a lower one. It also happens if the page was blocked mid-capture, by a reload prompt say, in which case just press Run again.";
 
 /**
  * Await a bulk transfer, giving up after `ms` of silence. Rejections pass
@@ -125,11 +162,13 @@ export class CaptureSession {
     // fx2lafw streams continuously and expects the host to keep several bulk
     // transfers in flight (like libsigrok's transfer pool). Reading one at a
     // time lets the FX2 FIFO overflow between transfers, stalling the stream
-    // after the first buffer — so we keep DEPTH transfers queued and process
+    // after the first buffer — so we keep `depth` transfers queued and process
     // them in submission order (WebUSB completes same-endpoint IN transfers in
-    // order), resubmitting each as it drains.
-    const transferSize = this.config.transferSize ?? 64 * 1024;
-    const depth = this.config.transferDepth ?? 8;
+    // order), resubmitting each as it drains. Both figures scale with the rate:
+    // see transferPlan(), which is what makes 16/24 MHz survivable.
+    const plan = transferPlan(this.config.sampleRate, this.config.transferSize);
+    const transferSize = plan.transferSize;
+    const depth = this.config.transferDepth ?? plan.depth;
     // A hostile/buggy device can return "ok" with a zero-length payload (or a
     // non-stall soft error) on every transfer. Those paths don't advance
     // `collected`, so without a bound the loop would resubmit forever, pegging a
