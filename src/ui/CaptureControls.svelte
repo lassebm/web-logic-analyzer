@@ -11,7 +11,9 @@
     decoderRateWarning,
     setChannelEnabled,
     setAllChannelsEnabled,
+    unsavedCapture,
   } from "../stores/session";
+  import ConfirmButton from "./ConfirmButton.svelte";
   import {
     SAMPLE_RATES,
     formatSampleRate,
@@ -78,6 +80,11 @@
     if ($connStatus !== "ready") return "Connect a device first.";
     return "";
   });
+  let overwriteHint = $derived(
+    $unsavedCapture
+      ? "Start a capture — this discards the current one, so it asks to confirm. Export it first to keep it."
+      : "Start a capture",
+  );
 </script>
 
 <section class="controls">
@@ -216,12 +223,17 @@
       {#if running}
         <button class="danger" onclick={stopCapture}>Stop</button>
       {:else}
-        <button
+        <!-- Running discards the current capture, so ask first when there is one
+             that only exists here (an import or the demo can be reloaded). -->
+        <ConfirmButton
           class="primary"
-          onclick={startCapture}
+          label="Run"
+          confirmLabel="Confirm run?"
+          onconfirm={startCapture}
+          needsConfirm={$unsavedCapture}
           disabled={!canRun}
-          title={runHint}>Run</button
-        >
+          title={runHint || overwriteHint}
+        />
       {/if}
     </div>
   </div>

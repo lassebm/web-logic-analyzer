@@ -14,6 +14,7 @@ import {
   captureBuffer,
   captureStatus,
   captureTick,
+  isTabOnlyCapture,
   monitorActive,
   sampleSource,
   type CaptureStatus,
@@ -33,7 +34,7 @@ export interface UnsavedWorkState {
 export function unsavedWorkReason(s: UnsavedWorkState): string | null {
   if (s.captureStatus === "running") return "A capture is still running.";
   if (s.monitorActive) return "The serial monitor is still running.";
-  if (s.sampleSource === "capture" && s.sampleCount > 0)
+  if (isTabOnlyCapture(s.sampleSource, s.sampleCount))
     return "This capture is only in memory — export it first to keep it.";
   if (s.monitorLineCount > 0)
     return "The serial log is only in memory — save it first to keep it.";

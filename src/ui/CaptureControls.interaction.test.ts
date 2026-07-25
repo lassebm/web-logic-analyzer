@@ -9,19 +9,69 @@ import {
   connStatus,
   captureStatus,
   captureSamples,
+  captureBuffer,
+  captureTick,
+  sampleSource,
   monitorActive,
   decoders,
+  type SampleSource,
 } from "../stores/session";
 import { CHANNEL_NAMES } from "../usb/constants";
 import { defaultConfig } from "../test/fixtures";
+import { packLevels } from "../test/waveforms";
 
 beforeEach(() => {
   connStatus.set("ready");
   captureStatus.set("idle");
   captureSamples.set(0);
+  captureBuffer.set(null);
+  sampleSource.set("capture");
   monitorActive.set(false);
   decoders.set([]);
   config.set(defaultConfig());
+});
+
+describe("Run overwrite confirmation", () => {
+  // A capture only exists in the tab, so Run — which throws it away — asks first.
+  function withCapture(source: SampleSource = "capture") {
+    captureBuffer.set(packLevels(1_000_000, [0, 1, 0, 1]));
+    sampleSource.set(source);
+    captureTick.update((n) => n + 1);
+  }
+
+  it("asks before Run discards the current capture", async () => {
+    withCapture();
+    render(CaptureControls);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(
+      screen.getByRole("button", { name: "Confirm run?" }),
+    ).toBeInTheDocument();
+    expect(get(captureStatus)).toBe("idle"); // nothing started yet
+  });
+
+  it("runs on the first click with no capture to lose", async () => {
+    render(CaptureControls);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    // No device is connected in this test, so startCapture() bails — the point
+    // is that the click was not intercepted by an arming step.
+    expect(screen.queryByRole("button", { name: "Confirm run?" })).toBeNull();
+  });
+
+  it.each(["import", "demo"] as const)(
+    "does not ask about a %s buffer — it can be loaded again",
+    async (source) => {
+      withCapture(source);
+      render(CaptureControls);
+
+      await fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+      expect(screen.queryByRole("button", { name: "Confirm run?" })).toBeNull();
+    },
+  );
 });
 
 describe("CaptureControls interactions", () => {

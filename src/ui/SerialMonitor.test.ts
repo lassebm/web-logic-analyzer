@@ -63,11 +63,42 @@ describe("SerialMonitor", () => {
     expect(screen.getByDisplayValue("50")).toBeDisabled();
   });
 
-  it("requires a second click to clear (confirmable)", async () => {
+  it("requires a second click to clear a log (confirmable)", async () => {
+    monitorLines.set([{ t: 0, text: "hi", bytes: [104, 105], lastT: 0 }]);
     render(SerialMonitor);
     await fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(
       screen.getByRole("button", { name: "Confirm clear?" }),
     ).toBeInTheDocument();
+  });
+
+  it("clears an empty log without asking — nothing to lose", async () => {
+    render(SerialMonitor);
+    await fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
+  });
+
+  // Starting wipes the lines, so it asks first once there are some.
+  it("confirms before a Start discards the shown log", async () => {
+    connStatus.set("ready");
+    monitorLines.set([{ t: 0, text: "hi", bytes: [104, 105], lastT: 0 }]);
+    render(SerialMonitor);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    expect(
+      screen.getByRole("button", { name: "Confirm start?" }),
+    ).toBeInTheDocument();
+    expect(get(monitorActive)).toBe(false); // not started yet
+  });
+
+  it("starts straight away when there is no log to discard", async () => {
+    connStatus.set("ready");
+    render(SerialMonitor);
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+    // No arming step: the label stays "Start" (startMonitor() needs a device,
+    // so the click is a no-op here beyond proving it wasn't intercepted).
+    await fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
   });
 });

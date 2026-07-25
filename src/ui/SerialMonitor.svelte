@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
   import { connStatus, captureStatus } from "../stores/session";
   import {
     monitorActive,
@@ -18,6 +17,7 @@
   import { formatSampleRate } from "../usb/sampleRate";
   import { downloadText } from "../export/download";
   import EditableSelect from "./EditableSelect.svelte";
+  import ConfirmButton from "./ConfirmButton.svelte";
 
   const BAUDS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
@@ -74,38 +74,9 @@
     return out.join("\n");
   }
 
-  // Two-step confirm so Clear can't wipe the log by accident. Once armed, any
-  // click elsewhere, the Escape key, or a 3s timeout cancels it.
-  let confirmingClear = $state(false);
-  let clearTimer: ReturnType<typeof setTimeout> | undefined = $state();
-
-  function cancelConfirm() {
-    confirmingClear = false;
-    clearTimeout(clearTimer);
-    window.removeEventListener("click", onGlobalClick);
-    window.removeEventListener("keydown", onGlobalKey);
-  }
-  function onGlobalClick() {
-    cancelConfirm();
-  }
-  function onGlobalKey(e: KeyboardEvent) {
-    if (e.key === "Escape") cancelConfirm();
-  }
-
-  function clickClear(e: MouseEvent) {
-    if (confirmingClear) {
-      clearMonitor();
-      cancelConfirm();
-      return;
-    }
-    confirmingClear = true;
-    e.stopPropagation(); // don't let this same click immediately cancel
-    window.addEventListener("click", onGlobalClick);
-    window.addEventListener("keydown", onGlobalKey);
-    clearTimer = setTimeout(cancelConfirm, 3000);
-  }
-
-  onDestroy(cancelConfirm);
+  // Both Clear and Start throw the log away, so both ask first (ConfirmButton) —
+  // and only when there is a log to lose.
+  let hasLog = $derived($monitorLines.length > 0);
 
   let copied = $state(false);
   async function copyLog() {
@@ -227,12 +198,18 @@
     {#if $monitorActive}
       <button class="danger" onclick={stopMonitor}>Stop</button>
     {:else}
-      <button
+      <ConfirmButton
         class="primary"
-        onclick={startMonitor}
+        label="Start"
+        confirmLabel="Confirm start?"
+        onconfirm={startMonitor}
+        needsConfirm={hasLog}
         disabled={!canStart}
-        title={lockedReason}>Start</button
-      >
+        title={lockedReason ||
+          (hasLog
+            ? "Start logging — this clears the lines below, so it asks to confirm"
+            : "Start logging")}
+      />
     {/if}
     <button onclick={copyLog} title="Copy the shown columns to the clipboard"
       >{copied ? "Copied" : "Copy"}</button
@@ -241,13 +218,13 @@
       onclick={downloadLog}
       title="Download the shown columns as a .tsv file">Download</button
     >
-    <button
-      class:danger={confirmingClear}
-      onclick={clickClear}
+    <ConfirmButton
+      label="Clear"
+      confirmLabel="Confirm clear?"
+      onconfirm={clearMonitor}
+      needsConfirm={hasLog}
       title="Clear all lines"
-    >
-      {confirmingClear ? "Confirm clear?" : "Clear"}
-    </button>
+    />
   </div>
 
   <div class="cols">

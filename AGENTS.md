@@ -81,7 +81,10 @@ succeed.
   with "Load demo capture")), plus the shared `InfoTip` (ⓘ
   hover/focus popover), `EditableSelect` (a native-`<select>` preset dropdown with a
   "Custom…" text-entry escape hatch — used for the serial-monitor baud rate and any
-  decoder option that declares `presets`), and `format.ts`
+  decoder option that declares `presets`), `ConfirmButton` (arm-then-commit button
+  for actions that discard something — Run, monitor Start/Clear; click-elsewhere,
+  Escape or a 3 s timeout disarms, and `needsConfirm={false}` skips the step when
+  there is nothing to lose), and `format.ts`
   (`formatSampleCount` — compact k/M/G sample counts for the controls).
 - `monitor/` — `terminal.ts` (serial-monitor line assembly, pure/testable).
 - `stores/` — `session.ts` (stores + connect/capture/decode orchestration; owns the
@@ -91,7 +94,9 @@ succeed.
   channel show/hide `setChannelEnabled`/`setAllChannelsEnabled` (both re-decode, since
   a hidden channel also stops the decoders reading it — `decoderChannelsShown` is the
   shared predicate, used by `runAllDecoders` and by `WaveformCanvas` to drop those lanes);
-  `runAllDecoders(range?)`; `sampleSource` (capture vs import vs demo) and
+  `runAllDecoders(range?)`; `sampleSource` (capture vs import vs demo),
+  `isTabOnlyCapture`/`unsavedCapture` (a buffer that exists only here — the shared
+  rule behind Run's confirm step and the unload guard) and
   `viewFitsWhole` (the on-screen view is a whole-capture fit); `watchUsbDisconnect` —
   resets state when the device is unplugged; `loadCapture` — swaps in an imported
   buffer like a finished capture; `loadDemo` — loads the built-in demo capture and

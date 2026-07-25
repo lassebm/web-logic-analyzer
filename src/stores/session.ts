@@ -76,6 +76,19 @@ export const triggerSample = writable<number | null>(null);
 export type SampleSource = "capture" | "import" | "demo";
 export const sampleSource = writable<SampleSource>("capture");
 
+/**
+ * True for a buffer that exists only in this tab, i.e. one worth asking about
+ * before it is discarded. An import can be re-imported and the demo is one click
+ * away, so neither counts — the shared rule behind the Run button's confirm step
+ * and the beforeunload guard (stores/unloadGuard.ts).
+ */
+export function isTabOnlyCapture(
+  source: SampleSource,
+  sampleCount: number,
+): boolean {
+  return source === "capture" && sampleCount > 0;
+}
+
 export const view = writable<WaveView>({ viewStart: 0, samplesPerPixel: 1 });
 export const cursors = writable<number[]>([]);
 export const decoders = writable<DecoderInstance[]>([]);
@@ -90,6 +103,14 @@ export const viewportWidth = writable<number>(800); // waveform canvas width in 
  * leaving blank space until the user clicks Fit.
  */
 export const viewFitsWhole = writable<boolean>(false);
+
+/** What starting a capture would overwrite; drives the Run button's confirm
+ *  step. `captureTick` is a dependency because the buffer fills by mutation. */
+export const unsavedCapture = derived(
+  [captureTick, captureBuffer, sampleSource],
+  ([, $buffer, $source]) =>
+    isTabOnlyCapture($source, $buffer?.sampleCount ?? 0),
+);
 
 // Master enable for decoding; each DecoderInstance can also be toggled on/off
 // individually (enabled). A decoder only runs — live while capturing AND in the
