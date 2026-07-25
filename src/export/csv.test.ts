@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { CaptureBuffer } from "../model/capture";
 import { toCsv, csvChunks } from "./csv";
+import { parseCsv } from "../import/parse";
+import { SAMPLE_RATES } from "../usb/sampleRate";
 
 describe("toCsv", () => {
   it("writes a header and one row per sample with per-channel bits", () => {
@@ -53,5 +55,19 @@ describe("csvChunks", () => {
     // Header only, no data rows.
     expect(chunks.length).toBe(1);
     expect(chunks[0].text).toBe("sample,time_s,D0,D1");
+  });
+});
+
+describe("CSV round-trip", () => {
+  // The time_s step is the only record of the sample rate in a CSV, so every
+  // supported rate has to survive export -> import exactly: at 7 significant
+  // digits, 6 and 24 MHz came back one or two hertz low, which then made the
+  // next capture unachievable by the fx2lafw clock divider.
+  it.each(SAMPLE_RATES)("recovers a %i Hz sample rate exactly", (rate) => {
+    const buf = new CaptureBuffer(rate, 4);
+    buf.append(new Uint8Array([0b01, 0b10, 0b01, 0b11]));
+    const parsed = parseCsv(toCsv(buf, [0, 1]));
+    expect(parsed.sampleRate).toBe(rate);
+    expect(parsed.samples.length).toBe(4);
   });
 });

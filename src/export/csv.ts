@@ -6,6 +6,16 @@ import type { ExportChunk } from "./stream";
 export const CSV_ROWS_PER_CHUNK = 65_536;
 
 /**
+ * Significant decimals in the `time_s` column. Importing recovers the sample
+ * rate from the first two timestamps (`rateFromStep`), so the step has to be
+ * precise enough to round-trip every entry of SAMPLE_RATES: at 7 digits, 24 MHz
+ * came back as 23999998 — a rate no fx2lafw clock divider can produce, which
+ * then failed the next capture. 12 also keeps timestamps distinct far deeper
+ * into a long capture.
+ */
+const TIME_DIGITS = 12;
+
+/**
  * Export a capture as CSV in chunks (one row per sample), so huge captures
  * stream to a Blob instead of building one gigantic string. `channels` is the
  * list of physical channel indices to include. Concatenating every chunk's
@@ -25,7 +35,7 @@ export function* csvChunks(
   for (let i = 0; i < n; i++) {
     const byte = buf.byteAt(i);
     const cols = channels.map((c) => (byte >> c) & 1);
-    lines.push(`${i},${(i * dt).toExponential(6)},${cols.join(",")}`);
+    lines.push(`${i},${(i * dt).toExponential(TIME_DIGITS)},${cols.join(",")}`);
     if (lines.length >= rowsPerChunk) {
       yield { text: "\n" + lines.join("\n"), processed: i + 1 };
       lines = [];
