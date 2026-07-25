@@ -134,6 +134,8 @@ function gcd(a: number, b: number): number {
  */
 export class VcdAccumulator {
   private idToChannel = new Map<string, number>();
+  /** Next channel handed out to a $var whose name isn't one of D0..D7. */
+  private nextAutoChannel = 0;
   private unitPs = 1;
   private inDefs = true;
   private byte = 0;
@@ -188,8 +190,14 @@ export class VcdAccumulator {
       } else if (line.startsWith("$var")) {
         // $var wire 1 <id> <name> $end
         const p = line.split(/\s+/);
-        const ch = CHANNEL_NAMES.indexOf(p[4]);
-        if (ch >= 0) this.idToChannel.set(p[3], ch);
+        const named = CHANNEL_NAMES.indexOf(p[4]);
+        // Our own exports name channels D0..D7; a file from another tool names
+        // them anything (clk, sda, ...) and used to map to nothing at all, so it
+        // imported as eight flat traces with no error. Fall back to declaration
+        // order for unrecognised names — the first eight signals become D0..D7.
+        const ch = named >= 0 ? named : this.nextAutoChannel++;
+        if (ch >= 0 && ch < CHANNEL_NAMES.length)
+          this.idToChannel.set(p[3], ch);
       } else if (line.startsWith("$enddefinitions")) {
         this.inDefs = false;
       }

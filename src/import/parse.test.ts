@@ -236,3 +236,49 @@ describe("VCD length without our $comment", () => {
     expect([...fallback.samples]).toEqual([...levels]);
   });
 });
+describe("VCD from another tool", () => {
+  const body = [
+    "$enddefinitions $end",
+    "#0",
+    "0!",
+    '0"',
+    "#1",
+    "1!",
+    "#2",
+    "0!",
+    '1"',
+    "#3",
+    "1!",
+    "#4",
+  ].join("\n");
+
+  // Signals from PulseView/GTKWave/a simulator are named clk, sda, ... — never
+  // D0..D7 — and used to map to no channel at all, so the file imported as eight
+  // flat traces with no error at all.
+  it("maps unrecognised signal names by declaration order", () => {
+    const p = parseVcd(
+      [
+        "$timescale 1 us $end",
+        "$var wire 1 ! clk $end",
+        '$var wire 1 " sda $end',
+        body,
+      ].join("\n"),
+    );
+    expect(p.sampleRate).toBe(1_000_000);
+    // clk -> D0 (bit 0), sda -> D1 (bit 1): 0,1,2(=sda high+clk low),3
+    expect([...p.samples]).toEqual([0, 1, 2, 3]);
+  });
+
+  it("still honours explicit D0..D7 names, whatever their order", () => {
+    const p = parseVcd(
+      [
+        "$timescale 1 us $end",
+        "$var wire 1 ! D1 $end", // declared first but must stay D1
+        '$var wire 1 " D0 $end',
+        body,
+      ].join("\n"),
+    );
+    // bit 1 follows "!" and bit 0 follows '"': 0,2,1,3
+    expect([...p.samples]).toEqual([0, 2, 1, 3]);
+  });
+});

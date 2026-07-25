@@ -85,7 +85,8 @@ for you.
   even a 100M-sample capture saves without freezing the tab.
 - **Import** a CSV or VCD capture back in for offline review, large files included. A VCD
   saved by this app reloads exactly as captured; a VCD from another tool reloads as
-  faithfully as the format allows.
+  faithfully as the format allows — its first eight signals become D0–D7, in the
+  order the file declares them.
 - **Serial Monitor** — a continuous-capture UART terminal in its own tab (the FX2 captures
   one thing at a time, so it's a mode, not an overlay), with full UART settings and
   toggleable columns (timestamps, raw hex, text). A new line starts on a line-feed and,
