@@ -84,6 +84,37 @@ describe("renderer.render()", () => {
     expect(high).toBeGreaterThan(low);
   });
 
+  it("leaves the space before sample 0 blank when panned left of the start", () => {
+    const fc = makeFakeCanvas(100, 400);
+    const buf = new CaptureBuffer(1_000_000, 20);
+    buf.append(new Uint8Array(20).fill(1)); // ch0 high throughout
+    const rows: RenderRow[] = [{ kind: "channel", channel: 0, label: "D0" }];
+    // viewStart -50 at 1 sample/px puts sample 0 at x = 50.
+    render(
+      fc.canvas,
+      baseParams(rows, {
+        buf,
+        width: 100,
+        view: { viewStart: -50, samplesPerPixel: 1 },
+      }),
+    );
+
+    // Trace geometry only: gridlines/cursors span the full height, so their y
+    // values fall outside the row's inner band.
+    const traceXs = fc.calls
+      .filter((c) => c.op === "moveTo" || c.op === "lineTo")
+      // The trace only ever sits at its two level lines (top+pad, top+h-pad);
+      // row midlines and full-height gridlines are elsewhere.
+      .filter((c) => {
+        const y = Number(c.args[1]);
+        return y === 28 || y === 56;
+      })
+      .map((c) => Number(c.args[0]));
+
+    expect(traceXs.length).toBeGreaterThan(0);
+    expect(Math.min(...traceXs)).toBeGreaterThanOrEqual(50);
+  });
+
   it("does nothing when the 2D context is unavailable", () => {
     const noCtx = { getContext: () => null } as unknown as HTMLCanvasElement;
     const rows: RenderRow[] = [{ kind: "channel", channel: 0, label: "D0" }];

@@ -234,6 +234,13 @@ function drawChannel(
     let s0 = Math.floor(xToSample(x, view));
     let s1 = Math.floor(xToSample(x + 1, view));
     if (s0 >= n) break;
+    // Columns before the capture starts are blank, not a continuation of sample
+    // 0: clamping s0 up to 0 used to smear its level across all of pre-t=0, so a
+    // pan left of the start made the first level look arbitrarily long.
+    if (s1 <= 0) {
+      prevEndY = null;
+      continue;
+    }
     if (s0 < 0) s0 = 0;
     if (s1 <= s0) s1 = s0 + 1;
     if (s1 > n) s1 = n;
