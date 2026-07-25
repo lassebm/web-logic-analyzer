@@ -70,6 +70,28 @@ function makeStreamingDevice(chunkSize: number) {
   };
 }
 
+/** Fake device that records how many bulk reads are outstanding at once. */
+function makeDepthProbeDevice(chunkSize: number) {
+  return {
+    inFlight: 0,
+    maxInFlight: 0,
+    async claim() {},
+    async controlOut() {},
+    readBulk(): Promise<USBInTransferResult> {
+      this.inFlight++;
+      this.maxInFlight = Math.max(this.maxInFlight, this.inFlight);
+      return Promise.resolve().then(() => {
+        this.inFlight--;
+        return {
+          status: "ok",
+          data: new DataView(new Uint8Array(chunkSize).buffer),
+        } as USBInTransferResult;
+      });
+    },
+    async reset() {},
+  };
+}
+
 /** Fake device that always returns an 'ok' but zero-length bulk result. */
 function makeIdleDevice() {
   return {
@@ -172,6 +194,28 @@ describe("CaptureSession", () => {
 
     expect(chunks.reduce((a, b) => a + b, 0)).toBe(2500); // last chunk truncated
     expect(dev.resetCalls).toBe(1);
+  });
+
+  // fx2lafw needs several transfers queued at once; a single-transfer loop lets
+  // the FX2 FIFO overflow between reads and stalls the stream after one buffer.
+  it("keeps transferDepth transfers in flight while streaming", async () => {
+    const dev = makeDepthProbeDevice(100);
+    const session = new CaptureSession(
+      dev as unknown as Fx2Device,
+      {
+        sampleRate: 1_000_000,
+        sampleLimit: 5000,
+        transferSize: 100,
+        transferDepth: 6,
+      },
+      { onData: () => {} },
+    );
+
+    await session.run();
+
+    // A floor, not an exact count: the loop resubmits before awaiting the
+    // drained transfer, so the peak is briefly depth + 1.
+    expect(dev.maxInFlight).toBeGreaterThanOrEqual(6);
   });
 
   it("aborts instead of looping forever when the device streams no data", async () => {

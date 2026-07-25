@@ -51,6 +51,39 @@ describe("renderer.render()", () => {
     expect(fc.count("stroke")).toBeGreaterThan(0);
   });
 
+  // Every other case here uses one row and asserts only that ops happened, so
+  // neither a vertical flip nor all rows collapsing onto one would be visible.
+  it("draws each row in its own y-band, with high above low", () => {
+    const fc = makeFakeCanvas(1000, 400);
+    // ch0 high for 7 of 8 samples, so the high level dominates its band.
+    const buf = new CaptureBuffer(1_000_000, 8);
+    buf.append(new Uint8Array([1, 1, 1, 1, 1, 1, 1, 0]));
+    const rows: RenderRow[] = [
+      { kind: "channel", channel: 0, label: "D0" },
+      { kind: "channel", channel: 1, label: "D1" },
+    ];
+    render(fc.canvas, baseParams(rows, { buf, width: 8, rowHeight: 40 }));
+
+    const ysIn = (top: number) =>
+      fc.calls
+        .filter((c) => c.op === "moveTo" || c.op === "lineTo")
+        .map((c) => Number(c.args[1]))
+        .filter((y) => y > top && y < top + 40);
+
+    // Row 0 spans y 22..62 and row 1 spans 62..102: both carry geometry, so the
+    // rows can't have collapsed onto one band.
+    expect(ysIn(22).length).toBeGreaterThan(0);
+    expect(ysIn(62).length).toBeGreaterThan(0);
+
+    // Within row 0, the mostly-high trace must sit mostly at the *smaller* y
+    // (screen coords), i.e. yHi = top + pad — otherwise it renders inverted.
+    const pad = 6;
+    const row0 = ysIn(22);
+    const high = row0.filter((y) => y === 22 + pad).length;
+    const low = row0.filter((y) => y === 22 + 40 - pad).length;
+    expect(high).toBeGreaterThan(low);
+  });
+
   it("does nothing when the 2D context is unavailable", () => {
     const noCtx = { getContext: () => null } as unknown as HTMLCanvasElement;
     const rows: RenderRow[] = [{ kind: "channel", channel: 0, label: "D0" }];

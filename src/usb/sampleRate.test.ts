@@ -35,9 +35,13 @@ describe("encodeSampleRate", () => {
     expect(c.sampleDelayL).toBe(219);
   });
 
-  it("can encode every advertised sample rate", () => {
+  // Not just "doesn't throw": a wrong-but-valid divider would capture at the
+  // wrong rate, silently shifting every timestamp, measurement and decoded baud.
+  it("encodes every advertised sample rate to a divider that reproduces it", () => {
     for (const r of SAMPLE_RATES) {
-      expect(() => encodeSampleRate(r)).not.toThrow();
+      const c = encodeSampleRate(r);
+      expect(c.baseClock / (c.delay + 1)).toBe(r);
+      expect((c.sampleDelayH << 8) | c.sampleDelayL).toBe(c.delay);
     }
   });
 
