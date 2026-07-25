@@ -176,3 +176,27 @@ describe("import guards (malicious/corrupt input)", () => {
     expect(rateFromStep(0, 1e-6)).toBe(1_000_000); // a normal 1 MHz step
   });
 });
+describe("VCD $timescale spanning lines", () => {
+  const body = [
+    "$var wire 1 ! D0 $end",
+    "$upscope $end",
+    "$enddefinitions $end",
+    "#0",
+    "0!",
+    "#1000",
+    "1!",
+    "#2000",
+    "0!",
+  ].join("\n");
+
+  // Simulators and GTKWave routinely wrap the section; the magnitude and unit
+  // used to have to share the $timescale line or the unit defaulted to ps,
+  // which is a 1000x timing error on every ruler tick and measurement.
+  it("reads a unit from the following lines, matching the inline form", () => {
+    const wrapped = parseVcd(["$timescale", "  1ns", "$end", body].join("\n"));
+    const inline = parseVcd(["$timescale 1 ns $end", body].join("\n"));
+    expect(wrapped.sampleRate).toBe(1_000_000);
+    expect(wrapped.sampleRate).toBe(inline.sampleRate);
+    expect(wrapped.samples.length).toBe(inline.samples.length);
+  });
+});

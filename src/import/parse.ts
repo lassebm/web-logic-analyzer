@@ -142,13 +142,31 @@ export class VcdAccumulator {
   // Exact rate/length from our own $comment, when present (see the exporter).
   private metaRate = 0;
   private metaSamples = -1;
+  // A $timescale whose magnitude/unit sit on following lines (common from
+  // simulators and GTKWave); without this the unit silently defaulted to ps.
+  private inTimescale = false;
+
+  /** Reads "1 ns" / "1ns" from a $timescale section line. True once found. */
+  private readTimescale(text: string): boolean {
+    const m = /(\d+)\s*(fs|ps|ns|us|ms|s)\b/.exec(text);
+    if (!m) return false;
+    this.unitPs = Number(m[1]) * (UNIT_PS[m[2]] ?? 1);
+    return true;
+  }
 
   line(raw: string): void {
     const line = raw.trim();
     if (this.inDefs) {
       if (line.startsWith("$timescale")) {
-        const m = /\$timescale\s+(\d+)\s*(fs|ps|ns|us|ms|s)/.exec(line);
-        if (m) this.unitPs = Number(m[1]) * (UNIT_PS[m[2]] ?? 1);
+        this.inTimescale = !this.readTimescale(line) && !line.includes("$end");
+      } else if (this.inTimescale) {
+        // Keep scanning the section until its $end (or any other declaration,
+        // in case the file never closes it).
+        if (this.readTimescale(line) || line.includes("$end")) {
+          this.inTimescale = false;
+        } else if (line.startsWith("$")) {
+          this.inTimescale = false;
+        }
       } else if (line.startsWith("$comment")) {
         const r = /samplerate=(\d+)/.exec(line);
         const s = /samples=(\d+)/.exec(line);
