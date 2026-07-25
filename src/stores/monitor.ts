@@ -99,6 +99,8 @@ function processMonitor(): void {
   let lastEndLocal = -1;
   for (const p of packets) {
     const absStart = monitorBuf.baseSample + p.startSample;
+    // Redundant with the trim below by design (removing both duplicates every
+    // byte); this is the correctness half, the trim is a memory bound.
     if (absStart <= lastProcessedAbs) continue;
     lastProcessedAbs = absStart;
     lastEndLocal = p.endSample;
