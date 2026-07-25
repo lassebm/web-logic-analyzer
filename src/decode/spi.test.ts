@@ -104,3 +104,55 @@ describe("spi decoder", () => {
     expect(anns.filter((a) => a.annClass === ANN_MOSI).length).toBe(0);
   });
 });
+describe("spi frame boundaries", () => {
+  const opts = {
+    cpol: 0,
+    cpha: 0,
+    bit_order: "msb-first",
+    word_size: 8,
+    cs_polarity: "active-low",
+  };
+
+  /** Frame 1 clocks `bits1` bits, then CS releases and frame 2 clocks a byte. */
+  function twoFrames(bits1: number, byte2: number, spb = 4): CaptureBuffer {
+    const samples = runs((push) => {
+      push(pack(0, 0, 0, 1), spb * 2);
+      push(pack(0, 0, 0, 0), spb); // CS asserted, frame 1
+      for (let i = 0; i < bits1; i++) {
+        push(pack(0, 1, 0, 0), spb); // all-ones payload
+        push(pack(1, 1, 0, 0), spb);
+      }
+      push(pack(0, 0, 0, 0), spb);
+      push(pack(0, 0, 0, 1), spb * 4); // CS released, bus idle
+
+      push(pack(0, 0, 0, 0), spb); // CS asserted, frame 2
+      for (let i = 7; i >= 0; i--) {
+        const m = (byte2 >> i) & 1;
+        push(pack(0, m, 0, 0), spb);
+        push(pack(1, m, 0, 0), spb);
+      }
+      push(pack(0, 0, 0, 0), spb);
+      push(pack(0, 0, 0, 1), spb * 2);
+    });
+    return packLevels(1_000_000, samples);
+  }
+
+  const mosiTexts = (buf: CaptureBuffer) =>
+    runDecoder(spiDecoder, buf, [0, 1, 2, 3], opts)
+      .annotations.filter((a) => a.annClass === ANN_MOSI)
+      .map((a) => a.texts[1]);
+
+  // A frame whose bit count isn't a multiple of word_size used to leave its
+  // remainder in the shift register, so every later word was misaligned.
+  it("discards a partial word at a chip-select boundary", () => {
+    const texts = mosiTexts(twoFrames(12, 0x5a));
+    expect(texts[0]).toBe("0xFF"); // frame 1's first full byte
+    expect(texts[1]).toBe("0x5A"); // frame 2 decodes cleanly, not 4 bits late
+    expect(texts).toHaveLength(2); // the 4 leftover bits never form a word
+  });
+
+  it("still decodes back-to-back whole words within one frame", () => {
+    const texts = mosiTexts(twoFrames(16, 0x5a));
+    expect(texts).toEqual(["0xFF", "0xFF", "0x5A"]);
+  });
+});

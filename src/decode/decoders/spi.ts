@@ -109,13 +109,25 @@ export const spiDecoder: Decoder = {
     let bits = 0;
     let wordStart = 0;
 
-    while (true) {
-      yield cond(CLK, clkCode);
+    // Waiting on the clock alone let a partial word survive a frame boundary, so
+    // a 12-bit frame misaligned every later word. CS edges are the frame
+    // boundary — and the framing event a windowed live decode resyncs on.
+    const waits = csEnabled
+      ? [cond(CLK, clkCode), cond(CS, "e")]
+      : [cond(CLK, clkCode)];
+    const resync = () => {
+      bits = 0;
+      mosiVal = 0;
+      misoVal = 0;
+    };
 
-      if (csEnabled && ctx.pin(CS) !== csActiveLevel) {
-        bits = 0;
-        mosiVal = 0;
-        misoVal = 0;
+    while (true) {
+      yield waits;
+
+      // A chip-select transition ends the frame; so does a clock edge arriving
+      // while CS is inactive.
+      if (csEnabled && (ctx.matched[1] || ctx.pin(CS) !== csActiveLevel)) {
+        resync();
         continue;
       }
 
@@ -138,9 +150,7 @@ export const spiDecoder: Decoder = {
         ctx.put(wordStart, end, ANN_MISO, formatWord(misoVal, wordSize));
         // Stack byte packets from the MOSI stream (the typical command/data line).
         ctx.emit(wordStart, end, "byte", { value: mosiVal, line: "mosi" });
-        bits = 0;
-        mosiVal = 0;
-        misoVal = 0;
+        resync();
       }
     }
   },
