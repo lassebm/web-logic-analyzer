@@ -143,6 +143,7 @@ export async function startMonitor(): Promise<void> {
 
   monitorTimer = setInterval(processMonitor, 80);
 
+  let failure: string | null = null;
   monitorSession = new CaptureSession(
     device,
     {
@@ -152,18 +153,24 @@ export async function startMonitor(): Promise<void> {
     },
     {
       onData: (chunk) => monitorBuf?.append(chunk),
-      onError: (err) => statusMessage.set(friendlyError(err)),
+      onError: (err) => {
+        failure = friendlyError(err);
+        statusMessage.set(failure);
+      },
     },
   );
 
   try {
     await monitorSession.run(); // resolves when stopMonitor() stops it
   } finally {
-    // A session that ends on its own (device unplugged mid-monitor) must release
-    // the capture<->monitor exclusion flag and the polling timer too — otherwise
-    // Run, Import and the demo stay refused until the user happens to press Stop.
+    // A session that ends on its own (device unplugged mid-monitor, or a stalled
+    // stream) must release the capture<->monitor exclusion flag and the polling
+    // timer too — otherwise Run, Import and the demo stay refused until the user
+    // happens to press Stop. stopMonitor()'s own "stopped" message would bury
+    // why it ended, so re-assert the failure afterwards.
     monitorSession = null;
     if (get(monitorActive)) stopMonitor();
+    if (failure) statusMessage.set(failure);
   }
 }
 

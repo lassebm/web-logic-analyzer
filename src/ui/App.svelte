@@ -21,6 +21,10 @@
     jumpToContent,
     activityPosition,
   } from "../stores/navigation";
+  import { registerUnloadGuard } from "../stores/unloadGuard";
+
+  // Warn before a refresh/navigation would discard a capture or serial log.
+  $effect(() => registerUnloadGuard());
 
   // The `$captureTick >= 0` term (always true) makes this re-evaluate as samples
   // stream in and at finish — the buffer fills by mutation, not by re-setting.

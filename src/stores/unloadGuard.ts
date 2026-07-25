@@ -1,0 +1,86 @@
+// Guard against losing work to a refresh or a navigation away from the page.
+// Nothing here is persisted, so a stray ⌘R discards a capture that may have
+// taken minutes to record, or a serial log that can't be replayed. A
+// `beforeunload` listener is the only way to intercept that — no in-app modal
+// can stop a reload or an address-bar navigation. Browsers show their own fixed
+// "Leave site?" wording and ignore any text we supply, so the reason strings
+// below are never seen by the user; they exist so the decision is testable.
+//
+// An imported or demo capture is deliberately *not* guarded: that data still
+// exists on disk (or is one click away), so prompting there would be nagging
+// rather than protection.
+import { derived, get, type Readable } from "svelte/store";
+import {
+  captureBuffer,
+  captureStatus,
+  captureTick,
+  monitorActive,
+  sampleSource,
+  type CaptureStatus,
+  type SampleSource,
+} from "./session";
+import { monitorLines } from "./monitor";
+
+export interface UnsavedWorkState {
+  captureStatus: CaptureStatus;
+  sampleSource: SampleSource;
+  sampleCount: number;
+  monitorActive: boolean;
+  monitorLineCount: number;
+}
+
+/** Why leaving would lose something, or null when there's nothing to lose. */
+export function unsavedWorkReason(s: UnsavedWorkState): string | null {
+  if (s.captureStatus === "running") return "A capture is still running.";
+  if (s.monitorActive) return "The serial monitor is still running.";
+  if (s.sampleSource === "capture" && s.sampleCount > 0)
+    return "This capture is only in memory — export it first to keep it.";
+  if (s.monitorLineCount > 0)
+    return "The serial log is only in memory — save it first to keep it.";
+  return null;
+}
+
+/** `captureTick` is in the dependency list because the buffer fills by mutation:
+ *  without it the sample count would go stale mid-capture. */
+export const unsavedWork: Readable<string | null> = derived(
+  [
+    captureStatus,
+    captureTick,
+    captureBuffer,
+    sampleSource,
+    monitorActive,
+    monitorLines,
+  ],
+  ([$status, , $buffer, $source, $monitorActive, $lines]) =>
+    unsavedWorkReason({
+      captureStatus: $status,
+      sampleSource: $source,
+      sampleCount: $buffer?.sampleCount ?? 0,
+      monitorActive: $monitorActive,
+      monitorLineCount: $lines.length,
+    }),
+);
+
+export function onBeforeUnload(event: BeforeUnloadEvent): void {
+  const reason = get(unsavedWork);
+  if (!reason) return;
+  event.preventDefault();
+  // Legacy path: older Chromium/Safari only prompt when returnValue is set.
+  event.returnValue = reason;
+}
+
+let registered = false;
+
+/**
+ * Attach the beforeunload guard (from the app root, on mount). Idempotent;
+ * returns a teardown that detaches it again.
+ */
+export function registerUnloadGuard(): () => void {
+  if (registered || typeof window === "undefined") return () => {};
+  registered = true;
+  window.addEventListener("beforeunload", onBeforeUnload);
+  return () => {
+    window.removeEventListener("beforeunload", onBeforeUnload);
+    registered = false;
+  };
+}

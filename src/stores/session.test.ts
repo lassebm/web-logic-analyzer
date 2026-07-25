@@ -114,6 +114,37 @@ describe("session capture", () => {
     expect(get(captureStatus)).toBe("done");
   });
 
+  // Blocking the page mid-capture (the leave-site prompt, say) kills the FX2
+  // stream for good: the endpoint goes quiet and the read never settles. The
+  // capture must end itself with the samples it got — it used to sit on
+  // "running" with the Stop button up, looking hung.
+  it("ends a capture whose stream goes quiet, keeping the partial samples", async () => {
+    const fake = new FakeUSBDevice({
+      firmwareVersion: [1, 3],
+      bulkChunks: [new Uint8Array(100)],
+      bulkHangsWhenDry: true,
+    });
+    handle = installFakeNavigatorUsb({ requestDevice: fake });
+    await connect();
+
+    config.update((c) => ({ ...c, sampleRate: 1_000_000, sampleLimit: 1e6 }));
+
+    vi.useFakeTimers();
+    try {
+      const capture = startCapture();
+      // Past the stall timeout with no data (the default is derived from the
+      // rate; 1 MHz with 64 KB transfers lands on the 3 s floor).
+      await vi.advanceTimersByTimeAsync(4000);
+      await capture;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(get(captureStatus)).not.toBe("running");
+    expect(get(captureBuffer)!.sampleCount).toBe(100);
+    expect(get(statusMessage)).toMatch(/stopped sending samples/i);
+  });
+
   it("stopCapture() is a no-op when nothing is running", () => {
     expect(() => stopCapture()).not.toThrow();
   });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CaptureSession, getFirmwareVersion, getRevId } from "./capture";
+import {
+  CaptureSession,
+  getFirmwareVersion,
+  getRevId,
+  stallTimeout,
+} from "./capture";
 import { CMD_START } from "./constants";
 import { encodeSampleRate } from "./sampleRate";
 import { Fx2Device } from "./fx2Device";
@@ -87,6 +92,56 @@ function makeDepthProbeDevice(chunkSize: number) {
           data: new DataView(new Uint8Array(chunkSize).buffer),
         } as USBInTransferResult;
       });
+    },
+    async reset() {},
+  };
+}
+
+/**
+ * Fake device that streams `okTransfers` chunks and then goes silent — the FX2
+ * after its FIFO has overflowed. reset() aborts the reads left hanging.
+ */
+function makeQuietingDevice(chunkSize: number, okTransfers: number) {
+  const rejects: Array<(e: unknown) => void> = [];
+  let served = 0;
+  return {
+    resetCalls: 0,
+    async claim() {},
+    async controlOut() {},
+    readBulk(): Promise<USBInTransferResult> {
+      if (served++ < okTransfers) {
+        return Promise.resolve({
+          status: "ok",
+          data: new DataView(new Uint8Array(chunkSize).buffer),
+        } as USBInTransferResult);
+      }
+      return new Promise((_resolve, reject) => {
+        rejects.push(reject);
+      });
+    },
+    async reset() {
+      this.resetCalls++;
+      while (rejects.length) rejects.pop()?.(new Error("aborted by reset"));
+    },
+  };
+}
+
+/** Fake device that takes `delayMs` to fill each transfer. */
+function makeSlowDevice(chunkSize: number, delayMs: number) {
+  return {
+    async claim() {},
+    async controlOut() {},
+    readBulk(): Promise<USBInTransferResult> {
+      return new Promise((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              status: "ok",
+              data: new DataView(new Uint8Array(chunkSize).buffer),
+            } as USBInTransferResult),
+          delayMs,
+        ),
+      );
     },
     async reset() {},
   };
@@ -218,6 +273,54 @@ describe("CaptureSession", () => {
     expect(dev.maxInFlight).toBeGreaterThanOrEqual(6);
   });
 
+  // A page blocked mid-capture (the leave-site prompt, for one) lets the FX2 FIFO
+  // overflow, and fx2lafw's stream never comes back: the endpoint goes quiet and
+  // the awaited read never settles. Without the stall timeout the caller sat on
+  // "capturing" forever, Stop button and all.
+  it("gives up on a stream that goes quiet, keeping what it collected", async () => {
+    const dev = makeQuietingDevice(1000, 2);
+    const chunks: number[] = [];
+    let error: unknown;
+    const session = new CaptureSession(
+      dev as unknown as Fx2Device,
+      {
+        sampleRate: 1_000_000,
+        sampleLimit: 1e9,
+        transferSize: 1000,
+        transferDepth: 2,
+        stallTimeoutMs: 20,
+      },
+      { onData: (c) => chunks.push(c.length), onError: (e) => (error = e) },
+    );
+
+    await session.run(); // must not hang
+
+    expect(chunks.reduce((a, b) => a + b, 0)).toBe(2000); // partial data kept
+    expect((error as Error).message).toMatch(/stopped sending samples/i);
+    expect(dev.resetCalls).toBe(1);
+  });
+
+  it("keeps streaming from a device that takes its time per transfer", async () => {
+    const dev = makeSlowDevice(1000, 60);
+    const chunks: number[] = [];
+    let error: unknown;
+    const session = new CaptureSession(
+      dev as unknown as Fx2Device,
+      {
+        sampleRate: 20_000,
+        sampleLimit: 2000,
+        transferSize: 1000,
+        transferDepth: 2,
+      },
+      { onData: (c) => chunks.push(c.length), onError: (e) => (error = e) },
+    );
+
+    await session.run();
+
+    expect(error).toBeUndefined();
+    expect(chunks.reduce((a, b) => a + b, 0)).toBe(2000);
+  });
+
   it("aborts instead of looping forever when the device streams no data", async () => {
     const dev = makeIdleDevice();
     let error: unknown;
@@ -237,6 +340,24 @@ describe("CaptureSession", () => {
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toMatch(/no sample data/i);
     expect(dev.resetCalls).toBe(1);
+  });
+});
+
+describe("stallTimeout", () => {
+  it("holds a floor at fast rates, where a transfer fills in ~ms", () => {
+    expect(stallTimeout(64 * 1024, 24_000_000)).toBe(3000);
+  });
+
+  it("scales past the floor when one transfer takes seconds to fill", () => {
+    // 64 KB at 20 kHz = 3.28 s per transfer; a 3 s bound would abort a healthy
+    // slow capture on its first read.
+    const ms = stallTimeout(64 * 1024, 20_000);
+    expect(ms).toBeGreaterThan((64 * 1024 * 1000) / 20_000);
+    expect(ms).toBeLessThanOrEqual(60_000);
+  });
+
+  it("caps the wait, so a bogus rate can't hang the capture", () => {
+    expect(stallTimeout(64 * 1024, 0)).toBe(60_000);
   });
 });
 

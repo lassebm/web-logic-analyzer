@@ -45,6 +45,12 @@ export interface FakeUSBDeviceOptions {
    * function for lazy/infinite streams.
    */
   bulkChunks?: Uint8Array[] | (() => Uint8Array | null);
+  /**
+   * Once the chunk queue runs dry, leave bulk reads pending forever instead of
+   * returning a zero-length result — a real FX2 whose stream has died goes quiet
+   * rather than idle. reset() rejects whatever is left hanging, as WebUSB does.
+   */
+  bulkHangsWhenDry?: boolean;
 }
 
 type ConnectListener = (ev: unknown) => void;
@@ -74,6 +80,7 @@ export class FakeUSBDevice {
   private readonly bulkNumber: number;
   private bulkQueue: Uint8Array[] | null;
   private readonly bulkFn: (() => Uint8Array | null) | null;
+  private readonly hangingReads: Array<(err: unknown) => void> = [];
 
   constructor(opts: FakeUSBDeviceOptions = {}) {
     this.opts = opts;
@@ -155,6 +162,8 @@ export class FakeUSBDevice {
 
   async reset(): Promise<void> {
     this.resetCalls++;
+    while (this.hangingReads.length)
+      this.hangingReads.pop()?.(new Error("transfer aborted by reset"));
   }
 
   async controlTransferOut(
@@ -210,6 +219,11 @@ export class FakeUSBDevice {
     let chunk: Uint8Array | null = null;
     if (this.bulkFn) chunk = this.bulkFn();
     else if (this.bulkQueue) chunk = this.bulkQueue.shift() ?? null;
+    if (!chunk && this.opts.bulkHangsWhenDry) {
+      return new Promise<USBInTransferResult>((_resolve, reject) => {
+        this.hangingReads.push(reject);
+      });
+    }
     const data = chunk ?? new Uint8Array(0);
     const clipped = data.length > length ? data.subarray(0, length) : data;
     return {

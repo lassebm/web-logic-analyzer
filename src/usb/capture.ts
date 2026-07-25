@@ -46,6 +46,56 @@ export interface CaptureConfig {
   transferSize?: number;
   /** Number of bulk transfers to keep in flight (default 8). */
   transferDepth?: number;
+  /** Silence (ms) that counts as a dead stream; defaults to `stallTimeout()`. */
+  stallTimeoutMs?: number;
+}
+
+/** Floor for the stall timeout, so fast rates still get a little slack. */
+const MIN_STALL_MS = 3000;
+/** Ceiling, so the slowest rates (and a bogus one) can't wait absurdly long. */
+const MAX_STALL_MS = 60_000;
+/** Multiples of one transfer's fill time before silence counts as a stall. */
+const STALL_FILL_FACTOR = 6;
+
+/**
+ * How long silence from the device may last before the stream counts as dead.
+ * Derived from how long one transfer takes to fill at `sampleRate`, since a
+ * 64 KB transfer at 20 kHz legitimately takes seconds — a fixed bound would
+ * either cut slow captures short or leave fast ones hanging.
+ */
+export function stallTimeout(transferSize: number, sampleRate: number): number {
+  const fillMs = (transferSize / sampleRate) * 1000;
+  return Math.min(
+    MAX_STALL_MS,
+    Math.max(MIN_STALL_MS, fillMs * STALL_FILL_FACTOR),
+  );
+}
+
+/** Resolved by the stall timer; distinguishable from any transfer result. */
+const TIMED_OUT = Symbol("stalled");
+
+const STALL_MESSAGE =
+  "The device stopped sending samples — the stream can't resume once the page is blocked mid-capture (by a reload prompt, say). Press Run to capture again.";
+
+/**
+ * Await a bulk transfer, giving up after `ms` of silence. Rejections pass
+ * through untouched; only the *absence* of a result is reported, as TIMED_OUT.
+ */
+async function readOrTimeout(
+  pending: Promise<USBInTransferResult>,
+  ms: number,
+): Promise<USBInTransferResult | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<typeof TIMED_OUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMED_OUT), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface CaptureCallbacks {
@@ -87,6 +137,16 @@ export class CaptureSession {
     const maxIdleTransfers = depth * 4;
     let idleTransfers = 0;
 
+    // fx2lafw has no stop command and no way to restart a stream it has stopped:
+    // if the host ever falls behind — the page blocked mid-capture by a modal
+    // prompt, a suspended machine — the FX2 FIFO overflows and the endpoint goes
+    // quiet for good. A bulk IN read on a quiet endpoint never settles, so
+    // without this bound the loop waits forever and the caller stays stuck on
+    // "capturing".
+    const stallMs =
+      this.config.stallTimeoutMs ??
+      stallTimeout(transferSize, this.config.sampleRate);
+
     const inflight: Array<Promise<USBInTransferResult>> = [];
     const canSubmit = () =>
       !this.stopped && this.collected < this.config.sampleLimit;
@@ -117,7 +177,14 @@ export class CaptureSession {
 
         let result: USBInTransferResult;
         try {
-          result = await pending;
+          const settled = await readOrTimeout(pending, stallMs);
+          if (settled === TIMED_OUT) {
+            // Back onto the queue: halt() rejects it via reset(), and only the
+            // transfers still listed get their rejection swallowed below.
+            inflight.unshift(pending);
+            throw new Error(STALL_MESSAGE);
+          }
+          result = settled;
         } catch (err) {
           if (this.stopped) break; // reset() aborted the transfers as requested
           throw err;

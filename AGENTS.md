@@ -35,7 +35,8 @@ succeed.
 - `usb/` — WebUSB layer: `constants.ts` (protocol facts), `fx2Device.ts` (device
   wrapper), `firmware.ts` (detect + upload + re-enumerate), `firmwareStore.ts`
   (custom-firmware IndexedDB cache), `capture.ts` (bulk streaming with an
-  in-flight transfer queue, plus the pre-capture firmware-version/rev-id probe),
+  in-flight transfer queue, the `stallTimeout` watchdog on a dead stream, plus the
+  pre-capture firmware-version/rev-id probe),
   `sampleRate.ts` (rate ↔ FX2 clock-divider `encodeSampleRate`, the supported-rate
   table `SAMPLE_RATES` (20 kHz–24 MHz), `formatSampleRate`, and the USB-bandwidth
   guard `bandwidthWarning` / `SUSTAINED_USB_BYTES_PER_SEC` (30 MB/s)).
@@ -95,7 +96,10 @@ succeed.
   resets state when the device is unplugged; `loadCapture` — swaps in an imported
   buffer like a finished capture; `loadDemo` — loads the built-in demo capture and
   adds a decoder per protocol plus a stacked ASCII decoder),
-  `monitor.ts` (serial-monitor orchestration), `navigation.ts` (waveform zoom/pan;
+  `monitor.ts` (serial-monitor orchestration), `unloadGuard.ts` (`beforeunload`
+  confirmation when a capture or serial log would be lost — `unsavedWork` derived
+  store + pure `unsavedWorkReason`; imported/demo buffers deliberately don't prompt;
+  registered from `App.svelte`), `navigation.ts` (waveform zoom/pan;
   at capture start, Follow-off pre-sizes the view to the sample limit
   (`resetViewForCapture`) while Follow-on rolls to frame the latest activity
   (`followView`), which also drives the throttled live in-view decode — plus the
@@ -159,6 +163,13 @@ succeed.
   software (`model/trigger.ts`), matching sigrok.
 - **Keep multiple bulk transfers in flight** during capture (`capture.ts`); a
   single-transfer loop stalls the FX2 FIFO after one buffer (~65536 samples).
+- **A dead stream never comes back, and a quiet endpoint never settles.** Once the
+  host falls behind — the page blocked by a modal prompt (the `beforeunload`
+  confirmation!), a suspended machine — the FIFO overflows and fx2lafw stops
+  sending; a pending bulk IN read then hangs forever, so the capture loop needs the
+  `stallTimeout` watchdog to end the run and keep the partial capture. Any change
+  around that timeout must stay rate-aware: one 64 KB transfer at 20 kHz takes 3.3 s
+  to fill, so a fixed sub-second bound would abort healthy slow captures.
 - The bulk-IN endpoint is read from the descriptor at runtime (0x82 vs 0x86).
 - **Keep per-chunk work O(chunk), never O(total).** `captureTick` bumps on every
   streamed chunk, so anything that rescans the whole buffer per chunk (rebuilding
