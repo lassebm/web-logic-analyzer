@@ -106,3 +106,52 @@ describe("uart decoder", () => {
     expect(annotations.some((a) => a.annClass === ANN_FRAME_ERR)).toBe(false);
   });
 });
+describe("uart framing edges", () => {
+  const sr = 1_000_000;
+  const baud = 100_000;
+  const spb = sr / baud; // 10 samples/bit
+  const opts = { baudrate: baud, data_bits: 8, parity: "none", stop_bits: 1 };
+
+  const dataTexts = (levels: number[]) =>
+    runDecoder(uartDecoder, packLevels(sr, levels), [0], opts)
+      .annotations.filter((a) => a.annClass === ANN_DATA)
+      .map((a) => a.texts[1]);
+
+  // A glitch shorter than half a bit is not a start bit; decoding on regardless
+  // produced a bogus byte and fed it to any stacked ASCII decoder.
+  it("flags a failed start bit and emits no byte for it", () => {
+    const levels: number[] = [];
+    const push = (v: number, n: number) => {
+      for (let i = 0; i < n; i++) levels.push(v);
+    };
+    push(1, spb * 4); // idle
+    push(0, spb * 0.3); // glitch low, back to idle before mid-bit
+    push(1, spb * 6); // idle again, no frame follows
+    const { annotations } = runDecoder(
+      uartDecoder,
+      packLevels(sr, levels),
+      [0],
+      opts,
+    );
+
+    expect(annotations.filter((a) => a.annClass === ANN_DATA)).toHaveLength(0);
+    expect(
+      annotations.filter((a) => a.annClass === ANN_FRAME_ERR).length,
+    ).toBeGreaterThan(0);
+  });
+
+  // The byte used to be emitted only after the stop bit was sampled, so a
+  // capture ending inside that bit lost its final character.
+  it("still emits the last byte when the capture ends inside its stop bit", () => {
+    const levels: number[] = [];
+    const push = (v: number, n: number) => {
+      for (let i = 0; i < n; i++) levels.push(v);
+    };
+    push(1, spb * 2); // idle
+    push(0, spb); // start bit
+    for (let i = 0; i < 8; i++) push((0x41 >> i) & 1, spb); // LSB-first
+    push(1, spb * 0.5); // capture ends halfway through the stop bit
+
+    expect(dataTexts(levels)).toEqual(["0x41"]);
+  });
+});

@@ -120,8 +120,17 @@ export const uartDecoder: Decoder = {
 
       // Sample start-bit centre to confirm framing.
       yield* skipToSample(ctx, s0 + spb * 0.5);
-      const startOk = bit(ctx.pin(DATA)) === 0;
       ctx.put(s0, Math.round(s0 + spb), ANN_START, ["Start", "S"]);
+      // Back at idle by mid-bit means a glitch, not a start bit: decoding on
+      // produced a bogus byte and fed it to any stacked ASCII decoder.
+      if (bit(ctx.pin(DATA)) !== 0) {
+        ctx.put(s0, Math.round(s0 + spb), ANN_FRAME_ERR, [
+          "Frame error",
+          "FE",
+          "!",
+        ]);
+        continue;
+      }
 
       // Data bits.
       let value = 0;
@@ -156,17 +165,8 @@ export const uartDecoder: Decoder = {
         );
       }
 
-      // Stop bit(s).
-      const stopIndex = dataBits + (parity !== "none" ? 1 : 0);
-      yield* skipToSample(ctx, bitStart(stopIndex) + spb * 0.5);
-      const stopOk = bit(ctx.pin(DATA)) === 1;
-      const stopEnd = Math.round(bitStart(stopIndex + stopBits));
-      ctx.put(Math.round(bitStart(stopIndex)), stopEnd, ANN_STOP, [
-        "Stop",
-        "T",
-      ]);
-
-      // Emit the assembled byte.
+      // Emit before waiting on the stop bit: a capture ending mid-stop-bit used
+      // to lose its final character.
       const dataStart = Math.round(bitStart(0));
       const dataEnd = Math.round(bitStart(dataBits));
       const printable = isPrintable(value) ? String.fromCharCode(value) : "";
@@ -178,13 +178,17 @@ export const uartDecoder: Decoder = {
       ]);
       ctx.emit(dataStart, dataEnd, "byte", { value });
 
+      // Stop bit(s).
+      const stopIndex = dataBits + (parity !== "none" ? 1 : 0);
+      yield* skipToSample(ctx, bitStart(stopIndex) + spb * 0.5);
+      const stopOk = bit(ctx.pin(DATA)) === 1;
+      const stopEnd = Math.round(bitStart(stopIndex + stopBits));
+      ctx.put(Math.round(bitStart(stopIndex)), stopEnd, ANN_STOP, [
+        "Stop",
+        "T",
+      ]);
+
       // Errors.
-      if (!startOk)
-        ctx.put(s0, Math.round(s0 + spb), ANN_FRAME_ERR, [
-          "Frame error",
-          "FE",
-          "!",
-        ]);
       if (!parityOk)
         ctx.put(
           Math.round(bitStart(dataBits)),
