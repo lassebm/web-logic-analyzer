@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CaptureSession, getFirmwareVersion, getRevId } from "./capture";
+import { CMD_START } from "./constants";
+import { encodeSampleRate } from "./sampleRate";
 import { Fx2Device } from "./fx2Device";
 import { FakeUSBDevice } from "../test/fakeUsb";
 
@@ -29,6 +31,24 @@ function makeBlockingDevice() {
       this.resetCalls++;
       while (rejects.length) rejects.pop()?.(new Error("aborted by reset"));
     },
+  };
+}
+
+/** Fake device that fails the given prologue step. */
+function makeFailingDevice(failAt: "claim" | "controlOut") {
+  return {
+    started: false,
+    async claim() {
+      if (failAt === "claim") throw new Error("claim failed");
+    },
+    async controlOut() {
+      if (failAt === "controlOut") throw new Error("start stalled");
+      this.started = true;
+    },
+    async readBulk(): Promise<USBInTransferResult> {
+      return { status: "ok", data: new DataView(new Uint8Array(8).buffer) };
+    },
+    async reset() {},
   };
 }
 
@@ -87,6 +107,52 @@ describe("CaptureSession", () => {
     await running; // must not hang
 
     expect(dev.resetCalls).toBe(1);
+  });
+
+  // A prologue failure used to reject run() instead of reaching onError, which
+  // stranded the caller on "capturing" forever with no message.
+  it.each(["claim", "controlOut"] as const)(
+    "reports a failing %s through onError instead of rejecting",
+    async (failAt) => {
+      const dev = makeFailingDevice(failAt);
+      const errors: unknown[] = [];
+      const session = new CaptureSession(
+        dev as unknown as Fx2Device,
+        { sampleRate: 1_000_000, sampleLimit: 100, transferSize: 64 },
+        { onData: () => {}, onError: (e) => errors.push(e) },
+      );
+
+      await expect(session.run()).resolves.toBeUndefined();
+      expect(errors).toHaveLength(1);
+      expect((errors[0] as Error).message).toMatch(
+        failAt === "claim" ? /claim failed/ : /start stalled/,
+      );
+    },
+  );
+
+  it("sends CMD_START with the encoded clock divider before streaming", async () => {
+    const sent: Array<{ req: number; data: number[] }> = [];
+    const dev = {
+      async claim() {},
+      async controlOut(req: number, _val: number, data: Uint8Array) {
+        sent.push({ req, data: [...data] });
+      },
+      async readBulk(): Promise<USBInTransferResult> {
+        return { status: "ok", data: new DataView(new Uint8Array(50).buffer) };
+      },
+      async reset() {},
+    };
+    const session = new CaptureSession(
+      dev as unknown as Fx2Device,
+      { sampleRate: 1_000_000, sampleLimit: 50, transferSize: 64 },
+      { onData: () => {} },
+    );
+    await session.run();
+
+    const { flags, sampleDelayH, sampleDelayL } = encodeSampleRate(1_000_000);
+    expect(sent).toEqual([
+      { req: CMD_START, data: [flags, sampleDelayH, sampleDelayL] },
+    ]);
   });
 
   it("stops at the sample limit and resets once", async () => {

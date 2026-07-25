@@ -333,8 +333,13 @@ export async function startCapture(): Promise<void> {
   // A mid-capture unplug nulls `device` (see onUsbDisconnect). Keep the partial
   // capture, but let the disconnect message stand rather than "Captured N".
   const deviceLost = device === null;
+  // finalizeCapture ends with a "Captured N samples." status, which would bury a
+  // real error (nothing renders captureStatus === "error", so the message is the
+  // only surface) — so re-assert it afterwards, as the unplug case already does.
+  const failure = get(captureStatus) === "error" ? get(statusMessage) : null;
   if (get(captureStatus) === "running") captureStatus.set("done");
   finalizeCapture(buf, cfg);
+  if (failure) statusMessage.set(failure);
   if (deviceLost)
     statusMessage.set("Device disconnected — showing the partial capture.");
 }

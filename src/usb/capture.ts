@@ -72,15 +72,6 @@ export class CaptureSession {
 
   /** Send CMD_START and stream bulk data until the sample limit or stop(). */
   async run(): Promise<void> {
-    // Re-claim in case a previous capture reset the device (which drops the claim).
-    await this.dev.claim();
-
-    const { flags, sampleDelayH, sampleDelayL } = encodeSampleRate(
-      this.config.sampleRate,
-    );
-    const startCmd = new Uint8Array([flags, sampleDelayH, sampleDelayL]);
-    await this.dev.controlOut(CMD_START, 0, startCmd);
-
     // fx2lafw streams continuously and expects the host to keep several bulk
     // transfers in flight (like libsigrok's transfer pool). Reading one at a
     // time lets the FX2 FIFO overflow between transfers, stalling the stream
@@ -99,10 +90,22 @@ export class CaptureSession {
     const inflight: Array<Promise<USBInTransferResult>> = [];
     const canSubmit = () =>
       !this.stopped && this.collected < this.config.sampleLimit;
-    for (let i = 0; i < depth && canSubmit(); i++)
-      inflight.push(this.dev.readBulk(transferSize));
 
     try {
+      // Claiming and CMD_START belong inside the try: a stalled start command or
+      // a claim lost to another program must reach cb.onError like any streaming
+      // failure, not reject run() and strand the caller's "capturing" state.
+      // Re-claim in case a previous capture reset the device (dropping the claim).
+      await this.dev.claim();
+      const { flags, sampleDelayH, sampleDelayL } = encodeSampleRate(
+        this.config.sampleRate,
+      );
+      const startCmd = new Uint8Array([flags, sampleDelayH, sampleDelayL]);
+      await this.dev.controlOut(CMD_START, 0, startCmd);
+
+      for (let i = 0; i < depth && canSubmit(); i++)
+        inflight.push(this.dev.readBulk(transferSize));
+
       while (
         inflight.length > 0 &&
         !this.stopped &&
@@ -144,7 +147,13 @@ export class CaptureSession {
     } catch (err) {
       if (!this.stopped) this.cb.onError?.(err);
     } finally {
-      await this.halt();
+      // A failed claim/start leaves nothing to reset, and a reset that itself
+      // throws must not replace the error we already reported.
+      try {
+        await this.halt();
+      } catch {
+        /* teardown is best-effort */
+      }
       // Swallow rejections from transfers aborted by the reset in halt().
       await Promise.allSettled(inflight);
     }

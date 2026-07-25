@@ -154,8 +154,15 @@ export async function startMonitor(): Promise<void> {
     },
   );
 
-  await monitorSession.run(); // resolves when stopMonitor() stops it
-  monitorSession = null;
+  try {
+    await monitorSession.run(); // resolves when stopMonitor() stops it
+  } finally {
+    // A session that ends on its own (device unplugged mid-monitor) must release
+    // the capture<->monitor exclusion flag and the polling timer too — otherwise
+    // Run, Import and the demo stay refused until the user happens to press Stop.
+    monitorSession = null;
+    if (get(monitorActive)) stopMonitor();
+  }
 }
 
 export function stopMonitor(): void {
