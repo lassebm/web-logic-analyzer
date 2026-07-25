@@ -144,6 +144,46 @@ describe("WaveformCanvas", () => {
     expect(get(cursors)).toEqual([30, 40]);
   });
 
+  it("ends a drag on pointercancel so a later move can't pan by a stale delta", async () => {
+    (
+      Element.prototype as unknown as Record<string, unknown>
+    ).setPointerCapture ??= () => {};
+    captureBuffer.set(idleBuffer());
+    view.set({ viewStart: 100, samplesPerPixel: 1 });
+    const { container } = render(WaveformCanvas);
+    await tick();
+    const canvas = container.querySelector("canvas")!;
+
+    await fireEvent.pointerDown(canvas, { clientX: 50, pointerId: 1 });
+    await fireEvent.pointerMove(canvas, { clientX: 40, pointerId: 1 });
+    const afterDrag = get(view).viewStart; // 100 + 10
+    expect(afterDrag).toBe(110);
+
+    // The browser takes the gesture over (touch becomes a native scroll).
+    await fireEvent.pointerCancel(canvas, { pointerId: 1 });
+    await fireEvent.pointerMove(canvas, { clientX: 500, pointerId: 1 });
+    expect(get(view).viewStart).toBe(afterDrag);
+  });
+
+  it("ignores a non-primary button, so a right-click drops no cursor", async () => {
+    (
+      Element.prototype as unknown as Record<string, unknown>
+    ).setPointerCapture ??= () => {};
+    captureBuffer.set(idleBuffer());
+    cursors.set([]);
+    const { container } = render(WaveformCanvas);
+    await tick();
+    const canvas = container.querySelector("canvas")!;
+
+    await fireEvent.pointerDown(canvas, {
+      clientX: 10,
+      pointerId: 1,
+      button: 2,
+    });
+    await fireEvent.pointerUp(canvas, { clientX: 10, pointerId: 1, button: 2 });
+    expect(get(cursors)).toEqual([]);
+  });
+
   it("pans on a horizontal (two-finger) wheel with no modifier", async () => {
     captureBuffer.set(idleBuffer());
     view.set({ viewStart: 0, samplesPerPixel: 2 });

@@ -181,16 +181,23 @@
   let dragStartView = $state(0);
   let moved = $state(false);
 
+  // The pointer that owns the current drag, so a second finger (or a hover on a
+  // hybrid device) can't be diffed against this drag's start position.
+  let dragPointer: number | null = $state(null);
+
   function onPointerDown(e: PointerEvent) {
     if (!$captureBuffer) return;
+    if (e.button !== 0) return; // left button only: a right-click opens the menu
+    if (dragPointer !== null) return; // already dragging with another pointer
     dragging = true;
+    dragPointer = e.pointerId;
     moved = false;
     dragStartX = e.clientX;
     dragStartView = $view.viewStart;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
   }
   function onPointerMove(e: PointerEvent) {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== dragPointer) return;
     const dx = e.clientX - dragStartX;
     if (Math.abs(dx) > 3) moved = true;
     if (moved) viewFitsWhole.set(false); // drag-pan leaves fit mode
@@ -200,9 +207,18 @@
     }));
   }
   function onPointerUp(e: PointerEvent) {
-    if (!dragging) return;
+    if (!dragging || e.pointerId !== dragPointer) return;
     dragging = false;
+    dragPointer = null;
     if (!moved) placeCursor(e);
+  }
+  // A gesture the browser takes over (a touch that becomes a native scroll of
+  // the lane stack) fires pointercancel and never pointerup, which used to leave
+  // `dragging` true — so the next move jumped the view by a stale delta.
+  function onPointerCancel(e: PointerEvent) {
+    if (e.pointerId !== dragPointer) return;
+    dragging = false;
+    dragPointer = null;
   }
 
   let nextCursor = $state(0);
@@ -248,6 +264,8 @@
       onpointerdown={onPointerDown}
       onpointermove={onPointerMove}
       onpointerup={onPointerUp}
+      onpointercancel={onPointerCancel}
+      onlostpointercapture={onPointerCancel}
     ></canvas>
   </div>
 </div>
