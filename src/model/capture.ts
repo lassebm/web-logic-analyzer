@@ -265,13 +265,17 @@ export class CaptureBuffer {
       return;
     }
     if (n < this.sumLen) this.sumLen = 0; // shrunk (trim) -> rebuild from scratch
-    this.extendBase(n);
-    this.rebuildUpperLevels();
+    const firstDirty = this.extendBase(n);
+    this.rebuildUpperLevels(firstDirty);
     this.sumLen = n;
   }
 
-  /** (Re)compute level-0 cells for samples in [sumLen, n), growing the arrays. */
-  private extendBase(n: number): void {
+  /**
+   * (Re)compute level-0 cells for samples in [sumLen, n), growing the arrays.
+   * Returns the first cell index it touched, so the levels above can be reduced
+   * from there instead of from scratch.
+   */
+  private extendBase(n: number): number {
     const LOG = CaptureBuffer.SUM_LOG;
     const BASE = 1 << LOG;
     const need = (n + BASE - 1) >> LOG;
@@ -309,10 +313,14 @@ export class CaptureBuffer {
       o0[b] = o;
     }
     this.levN[0] = need;
+    return from;
   }
 
-  /** Rebuild levels 1.. by pairwise-reducing the level below (O(cells)). */
-  private rebuildUpperLevels(): void {
+  /**
+   * Reduce levels 1.. pairwise from the first cell the latest append dirtied.
+   * Rebuilding every level in full cost O(total) per redraw (1.6 ms at 40M).
+   */
+  private rebuildUpperLevels(fromCell = 0): void {
     let k = 0;
     while (this.levN[k] > 1) {
       const childN = this.levN[k];
@@ -321,17 +329,23 @@ export class CaptureBuffer {
         this.levAnd.push(new Uint8Array(Math.max(parentN, 1)));
         this.levOr.push(new Uint8Array(Math.max(parentN, 1)));
         this.levN.push(0);
+        fromCell = 0; // fresh arrays: nothing to preserve
       } else if (this.levAnd[k + 1].length < parentN) {
         let cap = this.levAnd[k + 1].length;
         while (cap < parentN) cap *= 2;
-        this.levAnd[k + 1] = new Uint8Array(cap);
-        this.levOr[k + 1] = new Uint8Array(cap);
+        const pa = new Uint8Array(cap);
+        pa.set(this.levAnd[k + 1].subarray(0, this.levN[k + 1]));
+        this.levAnd[k + 1] = pa;
+        const po = new Uint8Array(cap);
+        po.set(this.levOr[k + 1].subarray(0, this.levN[k + 1]));
+        this.levOr[k + 1] = po;
       }
       const ca = this.levAnd[k];
       const co = this.levOr[k];
       const pa = this.levAnd[k + 1];
       const po = this.levOr[k + 1];
-      for (let j = 0; j < parentN; j++) {
+      const fromParent = Math.max(0, fromCell >> 1);
+      for (let j = fromParent; j < parentN; j++) {
         const c0 = 2 * j;
         const c1 = c0 + 1;
         let a = ca[c0];
@@ -344,6 +358,7 @@ export class CaptureBuffer {
         po[j] = o;
       }
       this.levN[k + 1] = parentN;
+      fromCell = fromParent;
       k++;
     }
     // Drop stale higher levels left over from a previously larger buffer.

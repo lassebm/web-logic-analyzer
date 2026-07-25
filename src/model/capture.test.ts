@@ -174,3 +174,45 @@ describe("CaptureBuffer", () => {
     expect(buf.baseSample).toBe(3);
   });
 });
+describe("min/max pyramid incremental updates", () => {
+  // The levels above level 0 are now reduced from the first dirty cell rather
+  // than rebuilt in full, so a query made *between* appends must give the same
+  // answer as the same data appended in one go.
+  it("matches a single-append buffer after interleaved appends and queries", () => {
+    const N = 5000;
+    const data = new Uint8Array(N);
+    for (let i = 0; i < N; i++) data[i] = (i * 37 + (i >> 5)) & 0xff;
+
+    const whole = new CaptureBuffer(1_000_000, N);
+    whole.append(data);
+
+    // Append in uneven chunks, querying after each so the summary is extended
+    // (and re-reduced) many times, including mid-cell boundaries.
+    const stepped = new CaptureBuffer(1_000_000, 64);
+    let off = 0;
+    for (const size of [1, 7, 31, 32, 33, 100, 511, 512, 700, 1000, 2073]) {
+      const end = Math.min(off + size, N);
+      stepped.append(data.subarray(off, end));
+      off = end;
+      stepped.channelMinMax(3, 0, stepped.sampleCount); // force a summary pass
+    }
+    stepped.append(data.subarray(off));
+
+    expect(stepped.sampleCount).toBe(N);
+    for (let ch = 0; ch < 8; ch++) {
+      for (const [lo, hi] of [
+        [0, N],
+        [0, 1],
+        [1, 33],
+        [31, 65],
+        [100, 4000],
+        [4096, N],
+        [N - 1, N],
+      ]) {
+        expect(stepped.channelMinMax(ch, lo, hi)).toEqual(
+          whole.channelMinMax(ch, lo, hi),
+        );
+      }
+    }
+  });
+});
