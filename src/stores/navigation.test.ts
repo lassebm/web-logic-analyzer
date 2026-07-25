@@ -355,3 +355,24 @@ describe("activityPosition", () => {
     expect(get(activityPosition)).toEqual({ index: 0, total: 2 }); // none selected
   });
 });
+describe("followView with a single edge", () => {
+  it("frames a readable window instead of collapsing to maximum zoom", () => {
+    // One transition only (e.g. a chip select asserting once): there is no edge
+    // interval to measure, and the old fallback of 1 sample pinned the viewport
+    // to ~15 samples for the rest of the run.
+    const levels = new Uint8Array(3000);
+    levels.fill(1, 1000); // single rising edge at 1000
+    const buf = new CaptureBuffer(1_000_000, levels.length);
+    buf.append(levels);
+    captureBuffer.set(buf);
+    viewportWidth.set(1000);
+    follow.set(true);
+
+    followView();
+
+    const v = get(view);
+    const windowSamples = v.samplesPerPixel * 1000;
+    expect(windowSamples).toBeGreaterThan(50); // not slammed to max zoom (~15)
+    expect(windowSamples).toBeLessThanOrEqual(buf.sampleCount);
+  });
+});

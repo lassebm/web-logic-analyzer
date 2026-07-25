@@ -144,7 +144,11 @@ export function followView(): void {
   // ongoing = still receiving (no idle gap yet) → cap to the detail window; else
   // the burst has completed → frame it whole.
   const ongoing = buf.sampleCount - cEnd <= clusterGapFor(buf.sampleRate);
-  const interval = buf.recentEdgeInterval() ?? 1;
+  // With fewer than two edges recorded there is no interval to measure. Falling
+  // back to 1 sample collapsed the view to ~15 samples at maximum zoom on the
+  // very first edge and left it there; a 1 ms window is a readable default.
+  const interval =
+    buf.recentEdgeInterval() ?? buf.sampleRate / 1000 / TARGET_EDGES;
   const start = ongoing
     ? Math.max(cStart, cEnd - interval * TARGET_EDGES)
     : cStart;
@@ -218,7 +222,17 @@ captureTick.subscribe(() => {
 });
 
 function fitRange(a: number, b: number, w: number): void {
-  const total = get(captureBuffer)?.sampleCount ?? b;
+  const buf = get(captureBuffer);
+  const total = buf?.sampleCount ?? b;
+  // A lone edge gives a == b, which would fit to maximum zoom and show no
+  // context at all. Widen a very narrow region about its centre — small enough
+  // not to distort a real one, and clamped to the capture below.
+  const MIN_FIT_SAMPLES = 64;
+  if (b - a < MIN_FIT_SAMPLES) {
+    const grow = (MIN_FIT_SAMPLES - (b - a)) / 2;
+    a -= grow;
+    b += grow;
+  }
   const span = Math.max(b - a, 1);
   const pad = Math.max(span * 0.15, 4);
   // Pad for breathing room, but clamp the padded window to the capture so it

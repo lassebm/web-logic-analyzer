@@ -125,6 +125,29 @@ describe("decode engine wait()", () => {
     expect(windowed.annotations).toEqual([]); // the only rising edge (3) is outside
   });
 
+  it("range matches an edge landing exactly on the window start", () => {
+    // The window is documented as [start, end), and windowTransitions indexes an
+    // edge at `start` — but waits match strictly after the current position, so
+    // starting at `start` used to drop it.
+    const gen = function* (ctx: DecoderContext) {
+      for (;;) {
+        yield cond(0, "r");
+        ctx.put(ctx.samplenum, ctx.samplenum, 0, ["r"]);
+      }
+    };
+    const windowed = runDecoder(
+      makeDecoder(gen),
+      fixture(),
+      [0, 1],
+      {},
+      {
+        start: 3, // the fixture's rising edge is exactly here
+        end: 12,
+      },
+    );
+    expect(windowed.annotations.map((a) => a.startSample)).toEqual([3]);
+  });
+
   it("range decodes edges inside the window (start bit resync)", () => {
     // bit1 rises at 7; a window covering it still catches it.
     const gen = function* (ctx: DecoderContext) {

@@ -246,7 +246,9 @@ export function runDecoder(
   const transitions = range
     ? windowTransitions(buf, start, end)
     : buf.transitions();
-  state.samplenum = start;
+  // One sample before the window: waits match transitions strictly after the
+  // current position, so starting *at* `start` skipped an edge landing there.
+  state.samplenum = Math.max(0, start - 1);
   const gen = decoder.decode(ctx);
   let result = gen.next();
   while (!result.done) {
