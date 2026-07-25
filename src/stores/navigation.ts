@@ -157,6 +157,8 @@ export function followView(): void {
 let lastDecodeAt = 0;
 let lastDecodeMs = 0;
 const MIN_DECODE_INTERVAL_MS = 150;
+/** Upper bound on samples decoded in one live pass (see liveDecodeInView). */
+export const MAX_LIVE_DECODE_SAMPLES = 2_000_000;
 
 function liveDecodeInView(): void {
   if (!get(decodersEnabled)) return; // master switch off
@@ -166,9 +168,15 @@ function liveDecodeInView(): void {
     return;
   const v = get(view);
   const w = get(viewportWidth);
-  const start = Math.max(0, Math.floor(v.viewStart));
+  let start = Math.max(0, Math.floor(v.viewStart));
   const end = Math.ceil(v.viewStart + w * v.samplesPerPixel);
   if (end <= start) return;
+  // On-screen is only a proxy for bounded: followView frames a completed burst
+  // whole, and the windowed decode scans its range sample-by-sample. Cap it so
+  // one pass can't block long enough to overflow the FX2 FIFO; the decode on
+  // stop covers what this preview skips.
+  if (end - start > MAX_LIVE_DECODE_SAMPLES)
+    start = end - MAX_LIVE_DECODE_SAMPLES;
   const t0 = performance.now();
   runAllDecoders({ start, end });
   lastDecodeMs = performance.now() - t0;
