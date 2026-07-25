@@ -115,6 +115,46 @@ describe("renderer.render()", () => {
     expect(Math.min(...traceXs)).toBeGreaterThanOrEqual(50);
   });
 
+  it("draws the edges inside the first visible column", () => {
+    const fc = makeFakeCanvas(20, 400);
+    // 2000 samples toggling every 5, 100 samples per pixel: every column holds
+    // many edges, including column 0.
+    const levels = new Uint8Array(2000);
+    for (let i = 0; i < levels.length; i++) levels[i] = (i / 5) & 1 ? 1 : 0;
+    const buf = new CaptureBuffer(1_000_000, levels.length);
+    buf.append(levels);
+    const rows: RenderRow[] = [{ kind: "channel", channel: 0, label: "D0" }];
+    render(
+      fc.canvas,
+      baseParams(rows, {
+        buf,
+        width: 20,
+        view: { viewStart: 0, samplesPerPixel: 100 },
+      }),
+    );
+
+    const at = (x: number) =>
+      fc.calls.filter(
+        (c) =>
+          (c.op === "moveTo" || c.op === "lineTo") &&
+          Number(c.args[0]) === x + 0.5 &&
+          (Number(c.args[1]) === 28 || Number(c.args[1]) === 56),
+      ).length;
+
+    // Column 0 used to emit a single moveTo, reading as a flat level. It has one
+    // op fewer than its neighbours by nature — no connecting line from a
+    // previous column — but must still span both levels.
+    const ysAt0 = fc.calls
+      .filter(
+        (c) =>
+          (c.op === "moveTo" || c.op === "lineTo") && Number(c.args[0]) === 0.5,
+      )
+      .map((c) => Number(c.args[1]));
+    expect(ysAt0).toContain(28); // high level
+    expect(ysAt0).toContain(56); // low level
+    expect(at(0)).toBeGreaterThan(1);
+  });
+
   it("does nothing when the 2D context is unavailable", () => {
     const noCtx = { getContext: () => null } as unknown as HTMLCanvasElement;
     const rows: RenderRow[] = [{ kind: "channel", channel: 0, label: "D0" }];

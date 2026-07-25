@@ -251,7 +251,16 @@ function drawChannel(
     const px = x + 0.5;
 
     if (prevEndY === null) {
-      ctx.moveTo(px, yEnd);
+      // First visible column: still show the edges inside it. Only moving to the
+      // end level made the leftmost column read as a flat line, hiding a narrow
+      // pulse that happened to land there.
+      if (mn !== mx) {
+        ctx.moveTo(px, yHi);
+        ctx.lineTo(px, yLo);
+        ctx.lineTo(px, yEnd);
+      } else {
+        ctx.moveTo(px, yEnd);
+      }
     } else {
       ctx.lineTo(px, prevEndY);
       if (mn !== mx || prevEndY !== yEnd) {

@@ -194,6 +194,26 @@ describe("WaveformCanvas", () => {
     expect(get(view).viewStart).toBeCloseTo(200, 6); // 0 + 100 * spp(2)
   });
 
+  it("zooms under the pointer on ctrl+wheel, keeping that sample fixed", async () => {
+    captureBuffer.set(idleBuffer());
+    view.set({ viewStart: 100, samplesPerPixel: 1 });
+    const { container } = render(WaveformCanvas);
+    await tick();
+    const canvas = container.querySelector("canvas")!;
+
+    // jsdom reports a zero rect, so clientX is the offset within the canvas.
+    // The sample under x=200 is 100 + 200 = 300 and must stay there after zoom.
+    await fireEvent.wheel(canvas, {
+      deltaY: -100,
+      ctrlKey: true,
+      clientX: 200,
+    });
+
+    const v = get(view);
+    expect(v.samplesPerPixel).toBeCloseTo(1 / 1.2, 6); // zoomed in
+    expect(v.viewStart + 200 * v.samplesPerPixel).toBeCloseTo(300, 6);
+  });
+
   it("leaves a plain vertical wheel for native scrolling (no pan)", async () => {
     captureBuffer.set(idleBuffer());
     view.set({ viewStart: 50, samplesPerPixel: 2 });
