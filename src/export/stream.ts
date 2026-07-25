@@ -12,13 +12,81 @@ function yieldToLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Minimal shape of the File System Access API bits we use. */
+interface SaveHandle {
+  createWritable(): Promise<{
+    write(data: string): Promise<void>;
+    close(): Promise<void>;
+  }>;
+}
+type SavePicker = (opts: {
+  suggestedName: string;
+  types: Array<{ description: string; accept: Record<string, string[]> }>;
+}) => Promise<SaveHandle>;
+
+/** True when the browser can write a file incrementally (Chromium). */
+export function canStreamToDisk(): boolean {
+  return (
+    typeof (window as { showSaveFilePicker?: SavePicker })
+      .showSaveFilePicker === "function"
+  );
+}
+
+/**
+ * Write a chunked export straight to a file the user picks, one chunk at a time.
+ *
+ * This is the only path that survives a large capture: a 100M-sample CSV is
+ * ~4.3 GB of text, and holding it as JS strings (UTF-16, so ~8.6 GB) exceeds
+ * Chrome's renderer heap and kills the tab before any Blob is built. Writing
+ * through a file handle keeps only the current chunk in memory.
+ *
+ * Returns false if the user cancelled the picker. Must be called from a user
+ * gesture, so do not await anything before it.
+ */
+export async function streamChunksToDisk(
+  filename: string,
+  mime: string,
+  total: number,
+  chunks: Iterable<ExportChunk>,
+  onProgress?: (fraction: number) => void,
+): Promise<boolean> {
+  const picker = (window as { showSaveFilePicker?: SavePicker })
+    .showSaveFilePicker;
+  if (!picker) throw new Error("File streaming is unavailable.");
+  let handle: SaveHandle;
+  try {
+    handle = await picker({
+      suggestedName: filename,
+      types: [
+        {
+          description: "Capture",
+          accept: { [mime]: [`.${filename.split(".").pop()}`] },
+        },
+      ],
+    });
+  } catch {
+    return false; // cancelled
+  }
+  const file = await handle.createWritable();
+  try {
+    for (const chunk of chunks) {
+      await file.write(chunk.text);
+      if (onProgress && total > 0) onProgress(chunk.processed / total);
+    }
+  } finally {
+    await file.close();
+  }
+  onProgress?.(1);
+  return true;
+}
+
 /**
  * Assemble a chunked export into a Blob and download it, yielding to the event
- * loop periodically. A 100M-row CSV runs to gigabytes — far past V8's ~512M-char
- * single-string limit — so we never build one giant string: each chunk is a
- * bounded string pushed into a `Blob` parts array. Yielding keeps the tab from
- * freezing (and hanging Chrome's "page unresponsive" dialog) and lets progress
- * paint. `onProgress` receives a 0..1 fraction.
+ * loop periodically so the tab keeps painting. No giant string is built, but
+ * every chunk is retained until the Blob is constructed, so peak memory is the
+ * whole file (doubled, strings being UTF-16) — fine for a modest capture, fatal
+ * for a large one. Prefer streamChunksToDisk; this is the fallback for browsers
+ * without the File System Access API. `onProgress` receives a 0..1 fraction.
  */
 export async function downloadChunks(
   filename: string,

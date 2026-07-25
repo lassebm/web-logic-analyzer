@@ -2,7 +2,11 @@
   import { captureBuffer, captureTick, config } from "../stores/session";
   import { csvChunks } from "../export/csv";
   import { vcdChunks } from "../export/vcd";
-  import { downloadChunks } from "../export/stream";
+  import {
+    downloadChunks,
+    streamChunksToDisk,
+    canStreamToDisk,
+  } from "../export/stream";
 
   function enabledChannels(): number[] {
     return $config.enabledChannels
@@ -14,8 +18,9 @@
   let progress = $state(0); // 0..1
   let error = $state("");
 
-  // Streams the export to a Blob off the main thread's critical path (yields
-  // between chunks) so a 100M-sample capture doesn't freeze the tab.
+  // Writes straight to a file the user picks when the browser allows it: a
+  // 100M-sample CSV is gigabytes, and accumulating that in memory (the Blob
+  // fallback) exceeds the renderer heap and kills the tab.
   async function run(kind: "csv" | "vcd") {
     const buf = $captureBuffer;
     if (!buf || busy) return;
@@ -26,22 +31,14 @@
       const chans = enabledChannels();
       const total = buf.sampleCount;
       const set = (f: number) => (progress = f);
-      if (kind === "csv") {
-        await downloadChunks(
-          "capture.csv",
-          "text/csv",
-          total,
-          csvChunks(buf, chans),
-          set,
-        );
+      const name = kind === "csv" ? "capture.csv" : "capture.vcd";
+      const mime = kind === "csv" ? "text/csv" : "text/plain";
+      const chunks =
+        kind === "csv" ? csvChunks(buf, chans) : vcdChunks(buf, chans);
+      if (canStreamToDisk()) {
+        await streamChunksToDisk(name, mime, total, chunks, set);
       } else {
-        await downloadChunks(
-          "capture.vcd",
-          "text/plain",
-          total,
-          vcdChunks(buf, chans),
-          set,
-        );
+        await downloadChunks(name, mime, total, chunks, set);
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);

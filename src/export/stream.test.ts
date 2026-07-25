@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { downloadChunks, type ExportChunk } from "./stream";
+import {
+  downloadChunks,
+  streamChunksToDisk,
+  canStreamToDisk,
+  type ExportChunk,
+} from "./stream";
 
 // jsdom implements neither URL.createObjectURL nor anchor navigation; stub them
 // so downloadChunks' final downloadBlob doesn't attempt a real download.
@@ -90,5 +95,77 @@ describe("downloadChunks", () => {
       (f) => seen.push(f),
     );
     expect(seen.at(-1)).toBe(1);
+  });
+});
+describe("streamChunksToDisk", () => {
+  type Picker = (o: unknown) => Promise<unknown>;
+  const setPicker = (fn: Picker | undefined) => {
+    (window as unknown as { showSaveFilePicker?: Picker }).showSaveFilePicker =
+      fn;
+  };
+  afterEach(() => setPicker(undefined));
+
+  const chunks: ExportChunk[] = [
+    { text: "a", processed: 1 },
+    { text: "b", processed: 2 },
+    { text: "c", processed: 3 },
+  ];
+
+  // The Blob path retains every chunk, which is ~8.6 GB of heap for a
+  // 100M-sample CSV and kills the tab; this one keeps only the current chunk.
+  it("writes each chunk through the file handle, in order", async () => {
+    const written: string[] = [];
+    const close = vi.fn();
+    setPicker(async () => ({
+      createWritable: async () => ({
+        write: async (t: string) => void written.push(t),
+        close,
+      }),
+    }));
+    const seen: number[] = [];
+
+    const ok = await streamChunksToDisk(
+      "capture.csv",
+      "text/csv",
+      3,
+      chunks,
+      (f) => seen.push(f),
+    );
+
+    expect(ok).toBe(true);
+    expect(written).toEqual(["a", "b", "c"]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(seen.at(-1)).toBe(1);
+  });
+
+  it("reports a cancelled picker without throwing", async () => {
+    setPicker(async () => {
+      throw new DOMException("cancelled", "AbortError");
+    });
+    await expect(
+      streamChunksToDisk("capture.csv", "text/csv", 3, chunks),
+    ).resolves.toBe(false);
+  });
+
+  it("closes the file even if a chunk write fails", async () => {
+    const close = vi.fn();
+    setPicker(async () => ({
+      createWritable: async () => ({
+        write: async () => {
+          throw new Error("disk full");
+        },
+        close,
+      }),
+    }));
+    await expect(
+      streamChunksToDisk("capture.csv", "text/csv", 3, chunks),
+    ).rejects.toThrow(/disk full/);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("canStreamToDisk reflects the API's presence", () => {
+    expect(canStreamToDisk()).toBe(false);
+    setPicker(async () => ({}));
+    expect(canStreamToDisk()).toBe(true);
   });
 });
