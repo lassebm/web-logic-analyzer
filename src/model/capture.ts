@@ -166,11 +166,21 @@ export class CaptureBuffer {
   transitions(): Uint32Array {
     if (this._transitions && this._transitionsLen === this.length)
       return this._transitions;
-    const idx: number[] = [];
+    // Count first, then fill the typed array directly. A JS number[] costs ~22
+    // bytes per edge against the 4 bytes it ends up as, so on an edge-dense
+    // 100M-sample capture (a fast clock on any channel) the intermediate array
+    // alone would transiently need gigabytes. Two passes over packed bytes are
+    // cheap next to that.
+    let count = 0;
     for (let i = 1; i < this.length; i++) {
-      if (this.data[i] !== this.data[i - 1]) idx.push(i);
+      if (this.data[i] !== this.data[i - 1]) count++;
     }
-    this._transitions = Uint32Array.from(idx);
+    const idx = new Uint32Array(count);
+    let w = 0;
+    for (let i = 1; i < this.length; i++) {
+      if (this.data[i] !== this.data[i - 1]) idx[w++] = i;
+    }
+    this._transitions = idx;
     this._transitionsLen = this.length;
     return this._transitions;
   }
