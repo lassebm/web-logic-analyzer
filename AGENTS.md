@@ -13,125 +13,64 @@ Waveform rendered on `<canvas>`.
 
 ## Commands
 
-```bash
-npm install          # install deps
-npm run dev          # dev server at http://127.0.0.1:5173 (localhost = secure context, WebUSB works)
-npm run check        # svelte-check type check — must be 0 errors / 0 warnings
-npm test             # vitest run (unit + component tests)
-npm run test:coverage# vitest with v8 coverage report
-npm run build        # svelte-check + production build to dist/
-npm run lint         # eslint (typescript-eslint + eslint-plugin-svelte, flat config)
-npm run lint:fix     # eslint --fix
-npm run format       # prettier --write . (opinionated defaults, minimal config)
-npm run format:check # prettier --check . (CI-friendly, no writes)
-```
+Scripts are in `package.json`. Two things it doesn't tell you:
 
-Before finishing any change: `npm run check`, `npm test`, and `npm run lint` must
-pass; formatting must be clean (`npm run format:check`); and `npm run build` should
-succeed.
+- `npm run dev` serves on `http://127.0.0.1:5173` — localhost is a secure context, so
+  WebUSB works there.
+- Before finishing any change: `npm run check`, `npm test`, and `npm run lint` must
+  pass; formatting must be clean (`npm run format:check`); and `npm run build` should
+  succeed.
 
 ## Architecture (`src/`)
 
-- `usb/` — WebUSB layer: `constants.ts` (protocol facts), `fx2Device.ts` (device
-  wrapper), `firmware.ts` (detect + upload + re-enumerate), `firmwareStore.ts`
-  (custom-firmware IndexedDB cache), `capture.ts` (bulk streaming with an
-  in-flight transfer queue sized by `transferPlan`, the `stallTimeout` watchdog on
-  a dead stream, plus the pre-capture firmware-version/rev-id probe),
-  `sampleRate.ts` (rate ↔ FX2 clock-divider `encodeSampleRate`, the supported-rate
-  table `SAMPLE_RATES` (20 kHz–24 MHz), `formatSampleRate`, and the USB-bandwidth
-  guard `bandwidthWarning` / `SUSTAINED_USB_BYTES_PER_SEC` (30 MB/s)).
-- `firmware/` — bundled `.fw` binaries + loader (`index.ts`: `loadBundledFirmware` /
-  `hasBundledFirmware` / `bundledFirmwareNames` — filename → asset URL only). The
-  VID:PID → firmware-filename map lives in `usb/constants.ts` (`PRE_FIRMWARE_DEVICES`);
-  the actual auto-select happens in `session.ts` `provision()`.
-- `model/` — `capture.ts` (`CaptureBuffer`: packed samples, transition index,
-  trimming; an incremental packed AND/OR **min/max pyramid** so `channelMinMax` is
-  O(log n) for zoomed-out rendering; and a recent-edge ring + live activity-cluster
-  tally — `recentEdgeInterval`/`activityClusterCount`/`latestCluster` — for the live
-  follow view), `trigger.ts` (software trigger), `clusters.ts` (activity grouping).
-- `decode/` — decoder plugin API (`types.ts`), `engine.ts` (edge-jumping generator
-  runner — decoders `yield` wait conditions, the runner advances to the next match
-  and calls back via `ctx.put`/`ctx.emit`/`ctx.pin` — plus stacked decoders;
-  `cond()`/`skipToSample()` helpers;
-  `runDecoder` takes an optional sample `range` to decode just a window, used for
-  live in-view decoding),
-  `format.ts` (shared `hex`/`isPrintable`), `decoders/` (uart, spi, i2c,
-  onewire, can, ascii), `registry.ts`, `detect/` (protocol auto-detection:
-  `uart.ts` — edge-timing baud estimate + trial-decode scoring; `i2c.ts` — scores
-  a channel pair on two structural metrics (SDA steady while SCL is high, plus the
-  fraction of SDA edges that land while SCL is high — near-zero on a real bus) and
-  a trial decode requiring START+STOP+bytes — `detectI2c` takes a _fixed_ SCL/SDA
-  orientation; `types.ts` — the `Detection` union + `detectionToDecoder`; `index.ts` —
-  `detectI2cPair` tries both orientations and keeps the higher-confidence one, and
-  `scanChannels` scores all I²C pairs and claims strongest-first (so a weak false
-  pair can't steal a real bus's line) before single-channel UART runs on what's
-  left).
-- `view/` — `renderer.ts` (canvas: traces, ruler, annotation lanes).
-- `ui/` — Svelte components (`App`, `DeviceBar`, `CaptureControls` (rate/samples/
-  trigger + the **Follow** live-view toggle + the Captured/Loaded readout — percent
-  of the sample limit during a real capture, a plain total for an imported/demo
-  buffer, branched on a `sampleSource`-derived `loaded` flag), `WaveformCanvas` (redraws coalesced to
-  one per animation frame; disabled decoders — and decoders reading a hidden channel —
-  drop their lanes; manual zoom/pan clears `viewFitsWhole`), `Measurements`,
-  `DecoderPanel` (add/configure decoders + master and per-decoder enable toggles +
-  drag-handle reorder via `moveDecoder`, and a hint naming the hidden channels that
-  are keeping an instance from running),
-  `DetectPanel` (auto-detect results), `ExportMenu`/`ImportMenu` (both show a busy
-  progress % while streaming), `SerialMonitor`, `HelpMenu` (top-bar **?** popover
-  with "Load demo capture")), plus the shared `InfoTip` (ⓘ
-  hover/focus popover), `EditableSelect` (a native-`<select>` preset dropdown with a
-  "Custom…" text-entry escape hatch — used for the serial-monitor baud rate and any
-  decoder option that declares `presets`), `ConfirmButton` (arm-then-commit button
-  for actions that discard something — Run, monitor Start/Clear; click-elsewhere,
-  Escape or a 3 s timeout disarms, and `needsConfirm={false}` skips the step when
-  there is nothing to lose), and `format.ts`
-  (`formatSampleCount` — compact k/M/G sample counts for the controls).
-- `monitor/` — `terminal.ts` (serial-monitor line assembly, pure/testable).
-- `stores/` — `session.ts` (stores + connect/capture/decode orchestration; owns the
-  device and the capture↔monitor mutual-exclusion flag; `detections`/`runDetection`;
-  decoder enable/disable — `decodersEnabled` master + per-instance `enabled`,
-  `setDecoderEnabled`/`setAllDecodersEnabled` — and decoder reorder `moveDecoder`;
-  channel show/hide `setChannelEnabled`/`setAllChannelsEnabled` (both re-decode, since
-  a hidden channel also stops the decoders reading it — `decoderChannelsShown` is the
-  shared predicate, used by `runAllDecoders` and by `WaveformCanvas` to drop those lanes);
-  `runAllDecoders(range?)`; `sampleSource` (capture vs import vs demo),
-  `isTabOnlyCapture`/`unsavedCapture` (a buffer that exists only here — the shared
-  rule behind Run's confirm step and the unload guard) and
-  `viewFitsWhole` (the on-screen view is a whole-capture fit); `watchUsbDisconnect` —
-  resets state when the device is unplugged; `loadCapture` — swaps in an imported
-  buffer like a finished capture; `loadDemo` — loads the built-in demo capture and
-  adds a decoder per protocol plus a stacked ASCII decoder),
-  `monitor.ts` (serial-monitor orchestration), `unloadGuard.ts` (`beforeunload`
-  confirmation when a capture or serial log would be lost — `unsavedWork` derived
-  store + pure `unsavedWorkReason`; imported/demo buffers deliberately don't prompt;
-  registered from `App.svelte`), `navigation.ts` (waveform zoom/pan;
-  at capture start, Follow-off pre-sizes the view to the sample limit
-  (`resetViewForCapture`) while Follow-on rolls to frame the latest activity
-  (`followView`), which also drives the throttled live in-view decode — plus the
-  `activityCursor`/`activityPosition` readout;
-  `fitRange` pads a region but clamps it to `[0, sampleCount]` so edge/whole-spanning
-  activity never frames negative time or trailing blank; `viewFitsWhole` re-fits the
-  whole view when the viewport width changes — window resize, or the demo fitting
-  before its tab's canvas has laid out — and, on any whole-capture fit, resets
-  `activityCursor` to 0).
-- `export/` — `csv.ts`/`vcd.ts` (chunk generators + full-string `toCsv`/`toVcd`),
-  `stream.ts` (`downloadChunks`: assembles chunks into a `Blob`, yielding to the event
-  loop with progress so 100M-sample exports don't freeze the tab or exceed V8's string
-  limit), `download.ts` (`downloadBlob`/`downloadText`). VCD embeds an exact
-  `samplerate`/`samples` `$comment` and a trailing end-timestamp marker.
-- `import/` — `parse.ts` (pure CSV/VCD parsers + shared line helpers and the
-  `VcdAccumulator`; VCD rate/length come from our `$comment`, else a GCD-of-timestamps
-  fallback), `importer.ts` (`importFile`: streams the file a slice at a time — never one
-  giant string — parsing into a `CaptureBuffer` with progress).
-- `demo/` — `capture.ts` (`buildDemoCapture`: a synthetic no-hardware capture with
-  one exchange per protocol laid out sequentially across the 8 channels — see the
-  channel map in its header; single source of truth for the `HelpMenu` demo action
-  and the committed `demo/all-signals.vcd`. `DEMO_DECODERS` is the pre-wired decoder
-  list `loadDemo` adds: one per protocol plus a stacked ASCII decoder after the UART).
-- `test/` — shared test doubles/fixtures: `fakeUsb.ts` (WebUSB + `navigator.usb`
-  fakes), `fakeCanvas.ts` (recording 2D context), `waveforms.ts` (sample/UART/I2C
-  builders), `fixtures.ts` (`defaultConfig`), `setup.ts` (jsdom test setup:
-  `@testing-library/jest-dom` matchers + a `ResizeObserver` polyfill).
+Module map — one line per directory, with the couplings and invariants the code
+alone won't teach you. Read the files for the actual APIs.
+
+- `usb/` — WebUSB layer: device wrapper, firmware detect/upload/re-enumerate, a
+  custom-firmware IndexedDB cache, the bulk-streaming capture loop, and the rate ↔ FX2
+  clock-divider math plus the USB-bandwidth guard. The capture loop's transfer queue
+  and stall watchdog are load-bearing — see the hardware notes below.
+- `firmware/` — bundled `.fw` binaries and their loader. The loader maps filename →
+  asset URL and nothing more: the VID:PID → firmware-filename map lives in
+  `usb/constants.ts` (`PRE_FIRMWARE_DEVICES`), and the auto-select happens in
+  `stores/session.ts` `provision()`.
+- `model/` — `CaptureBuffer` (packed samples, transition index, trimming), the
+  software trigger, and activity clustering. The buffer keeps an incremental min/max
+  pyramid so `channelMinMax` is O(log n) when zoomed out, plus a recent-edge ring and
+  cluster tally for the live follow view — both exist to satisfy the O(chunk) rule
+  below.
+- `decode/` — the decoder plugin API and an edge-jumping generator runner: decoders
+  `yield` wait conditions, the runner advances to the next match and calls back via
+  `ctx.put`/`ctx.emit`/`ctx.pin`. `runDecoder` takes an optional sample `range` so the
+  live view can decode just the window on screen. `detect/` auto-detects protocols;
+  `scanChannels` scores all I²C pairs and claims strongest-first — so a weak false pair
+  can't steal a real bus's line — before single-channel UART runs on what's left.
+- `view/` — canvas renderer: traces, ruler, annotation lanes.
+- `ui/` — Svelte components. `WaveformCanvas` coalesces redraws to one per animation
+  frame. Reuse the shared pieces rather than reinventing them: `InfoTip` (ⓘ popover),
+  `EditableSelect` (preset dropdown with a "Custom…" text-entry escape hatch),
+  `ConfirmButton` (arm-then-commit for actions that discard something).
+- `monitor/` — serial-monitor line assembly, pure/testable.
+- `stores/` — `session.ts` owns the device, the capture↔monitor mutual-exclusion flag,
+  and decode orchestration. Hiding a channel also stops the decoders reading it —
+  `decoderChannelsShown` is the shared predicate, used by both `runAllDecoders` and
+  `WaveformCanvas`. `unloadGuard.ts` prompts on unload when a capture or serial log
+  would be lost; imported/demo buffers deliberately don't prompt. `navigation.ts` owns
+  zoom/pan and the live follow view; `fitRange` clamps to `[0, sampleCount]` so edge-
+  or whole-spanning activity never frames negative time or trailing blank.
+- `export/` — CSV/VCD chunk generators plus `stream.ts`, which assembles chunks while
+  yielding to the event loop so a 100M-sample export doesn't freeze the tab or exceed
+  V8's string limit. VCD embeds an exact `samplerate`/`samples` `$comment` and a
+  trailing end-timestamp marker.
+- `import/` — pure CSV/VCD parsers; `importFile` streams the file a slice at a time,
+  never one giant string. VCD rate/length come from our `$comment`, else a
+  GCD-of-timestamps fallback.
+- `demo/` — `buildDemoCapture`: a synthetic no-hardware capture, one exchange per
+  protocol across the 8 channels (channel map in its header). It is the single source
+  of truth for both the `HelpMenu` demo action and the committed
+  `demo/all-signals.vcd`.
+- `test/` — shared doubles and fixtures: WebUSB fakes, a recording 2D context,
+  waveform builders, and the jsdom setup.
 
 ## Conventions
 
