@@ -180,7 +180,10 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 14px;
+    /* Height from --bar-h, not padding, so it matches the decoder panel's
+       header across the divider. */
+    min-height: var(--bar-h);
+    padding: 0 14px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-panel);
   }

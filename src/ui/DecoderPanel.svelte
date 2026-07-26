@@ -361,7 +361,7 @@
     top: 0;
     z-index: 5;
     margin: 0 -12px 10px;
-    padding: 10px 12px 8px;
+    padding: 0 12px;
     background: var(--bg-panel);
     border-bottom: 1px solid var(--border);
   }
@@ -369,6 +369,9 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    /* Height from --bar-h (less the divider) so this bar lines up with the
+       waveform toolbar next to it, whatever the controls inside measure. */
+    min-height: calc(var(--bar-h) - 1px);
   }
   .head strong {
     margin-right: 6px;
@@ -404,7 +407,7 @@
   }
   .add-list {
     list-style: none;
-    margin: 8px 0 0;
+    margin: 0 0 8px;
     padding: 4px;
     border: 1px solid var(--border);
     border-radius: 8px;

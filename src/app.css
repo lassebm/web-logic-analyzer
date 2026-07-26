@@ -23,6 +23,12 @@
   --fs-ui: 12px; /* labels, readouts, controls, popovers, badges, small buttons */
   --fs-micro: 10px; /* canvas ruler ticks only */
 
+  /* Height of the bars that sit side by side under the capture controls (the
+     waveform toolbar and the decoder panel's sticky header). Shared so their
+     bottom borders line up across the divider instead of each bar sizing
+     itself from its own padding + content. */
+  --bar-h: 44px;
+
   color-scheme: dark;
   font-family:
     system-ui,
