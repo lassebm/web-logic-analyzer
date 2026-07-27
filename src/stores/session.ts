@@ -530,27 +530,33 @@ export function decoderChannelsShown(
 /** Show/hide one capture channel: a view/decode/export filter (fx2lafw always
  *  streams all 8), so hiding one also stops the decoders reading it. */
 export function setChannelEnabled(ch: number, on: boolean): void {
+  const before = get(config).enabledChannels;
   config.update((cfg) => {
     const enabledChannels = [...cfg.enabledChannels];
     enabledChannels[ch] = on;
     return { ...cfg, enabledChannels };
   });
-  onChannelsChanged();
+  onChannelsChanged(before);
 }
 
 /** Show/hide every channel at once. */
 export function setAllChannelsEnabled(on: boolean): void {
+  const before = get(config).enabledChannels;
   config.update((cfg) => ({
     ...cfg,
     enabledChannels: Array(NUM_CHANNELS).fill(on),
   }));
-  onChannelsChanged();
+  onChannelsChanged(before);
 }
 
 // Clear the lanes that just lost their channel — refreshDecoders is a no-op
-// mid-capture, so waiting for the re-decode would leave them showing.
-function onChannelsChanged(): void {
+// mid-capture, so waiting for the re-decode would leave them showing. Detection
+// results only describe the channels they scanned, so a changed selection
+// retires them (closing the pane) the way a new capture does — re-scanning
+// instead would be a full O(capture) scan per checkbox click.
+function onChannelsChanged(before: boolean[]): void {
   const enabled = get(config).enabledChannels;
+  if (enabled.some((on, ch) => on !== before[ch])) detections.set(null);
   decoders.update((list) =>
     list.map((d) =>
       decoderChannelsShown(d, enabled) ? d : { ...d, annotations: [] },
@@ -677,6 +683,17 @@ export function runDetection(): void {
     .map((on, ch) => (on ? ch : -1))
     .filter((ch) => ch >= 0);
   detections.set(scanChannels(buf, channels));
+}
+
+/**
+ * What the "Detect" button does: scan, or close the results pane if it is already
+ * showing. Results are cleared whenever the capture or the channel selection
+ * changes, so an open pane always describes the current buffer and channels —
+ * re-scanning it would only find the same hits again.
+ */
+export function toggleDetection(): void {
+  if (get(detections) !== null) detections.set(null);
+  else runDetection();
 }
 
 /**

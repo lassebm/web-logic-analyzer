@@ -14,7 +14,8 @@
     captureStatus,
     captureBuffer,
     captureTick,
-    runDetection,
+    detections,
+    toggleDetection,
   } from "../stores/session";
   import {
     zoomToFit,
@@ -102,9 +103,13 @@
             >
           </div>
           <button
+            class:active={$detections !== null}
             disabled={!hasCapture}
-            onclick={runDetection}
-            title="Scan active channels for supported protocols and detect their settings"
+            onclick={toggleDetection}
+            aria-expanded={$detections !== null}
+            title={$detections !== null
+              ? "Hide detection results"
+              : "Scan active channels for supported protocols and detect their settings"}
             >Detect</button
           >
           <span class="sep"></span>
@@ -186,6 +191,11 @@
     padding: 0 14px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-panel);
+  }
+  /* Pressed look while the pane the button opened is showing. */
+  .toolbar button.active {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .sep {
     width: 1px;

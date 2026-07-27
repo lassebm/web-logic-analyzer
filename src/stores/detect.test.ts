@@ -6,6 +6,9 @@ import {
   decoders,
   detections,
   runDetection,
+  setAllChannelsEnabled,
+  setChannelEnabled,
+  toggleDetection,
 } from "./session";
 import { defaultConfig } from "../test/fixtures";
 import { i2cLevels, packLevels, uartBytes } from "../test/waveforms";
@@ -62,5 +65,57 @@ describe("runDetection", () => {
     }));
     runDetection();
     expect(get(detections)).toEqual([]); // scanned, nothing on the other channels
+  });
+});
+
+describe("toggleDetection", () => {
+  it("scans when no results are showing", () => {
+    captureBuffer.set(uartBytes(BYTES, SR / BAUD, SR));
+    toggleDetection();
+    expect(get(detections)!.length).toBe(1);
+  });
+
+  it("closes the results instead of re-scanning", () => {
+    captureBuffer.set(uartBytes(BYTES, SR / BAUD, SR));
+    toggleDetection();
+    toggleDetection();
+    expect(get(detections)).toBeNull();
+  });
+
+  it("closes an empty result set too", () => {
+    captureBuffer.set(uartBytes(BYTES, SR / BAUD, SR));
+    detections.set([]); // scan ran and found nothing — still an open pane
+    toggleDetection();
+    expect(get(detections)).toBeNull();
+  });
+});
+
+describe("channel changes retire detection results", () => {
+  beforeEach(() => captureBuffer.set(uartBytes(BYTES, SR / BAUD, SR)));
+
+  it("clears when a channel is hidden", () => {
+    runDetection();
+    setChannelEnabled(3, false);
+    expect(get(detections)).toBeNull();
+  });
+
+  it("clears when a channel is shown", () => {
+    setChannelEnabled(3, false);
+    runDetection();
+    setChannelEnabled(3, true);
+    expect(get(detections)).toBeNull();
+  });
+
+  it("clears on hide-all", () => {
+    runDetection();
+    setAllChannelsEnabled(false);
+    expect(get(detections)).toBeNull();
+  });
+
+  it("keeps results when the selection did not actually change", () => {
+    runDetection();
+    const before = get(detections);
+    setAllChannelsEnabled(true); // every channel was already shown
+    expect(get(detections)).toBe(before);
   });
 });
