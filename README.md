@@ -90,7 +90,10 @@ for you.
 - **Serial Monitor** — a continuous-capture UART terminal in its own tab (the FX2 captures
   one thing at a time, so it's a mode, not an overlay), with full UART settings and
   toggleable columns (timestamps, raw hex, text). A new line starts on a line-feed and,
-  optionally, after an idle gap; memory stays bounded automatically.
+  optionally, after an idle gap; memory stays bounded automatically. A device that sends
+  no line-feed at all has its output split into readable rows, and each split is marked
+  (↳) so you can tell it apart from a genuine new message — Copy and Download put the
+  pieces back together as one row.
 - **Demo capture** — no hardware required: **Load demo capture** from the **?** menu drops
   in a sample recording with a short exchange on every protocol and every decoder pre-wired,
   so you can try the whole app in seconds.

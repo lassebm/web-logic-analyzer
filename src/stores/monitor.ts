@@ -80,6 +80,24 @@ export function pickMonitorRate(baud: number): number {
   );
 }
 
+/**
+ * Publish a snapshot of the assembled lines for the view.
+ *
+ * A copy, so the view never reads the array while it mutates. Closed lines are
+ * published by reference — the view keys row identity and its formatting cache
+ * on the line object, so copying them all would re-render the whole scrollback
+ * every tick. The open line is the one exception: it is mutated in place as
+ * bytes arrive, and identity is what tells the view to refresh, so it gets a
+ * fresh object.
+ */
+function publishLines(): void {
+  if (!terminal) return;
+  const snapshot = terminal.lines.slice();
+  const open = snapshot.length - 1;
+  if (open >= 0) snapshot[open] = { ...snapshot[open] };
+  monitorLines.set(snapshot);
+}
+
 function processMonitor(): void {
   if (!monitorBuf || !terminal) return;
   const cfg = get(monitorConfig);
@@ -120,7 +138,9 @@ function processMonitor(): void {
     monitorBuf.trimBefore(monitorBuf.sampleCount - Math.ceil(spb * 20));
   }
 
-  monitorLines.set(terminal.lines.slice());
+  // Only republish when a byte actually landed — an idle tick would otherwise
+  // copy the whole scrollback 12x a second for nothing.
+  if (lastEndLocal >= 0) publishLines();
 }
 
 export async function startMonitor(): Promise<void> {
@@ -181,6 +201,8 @@ export function stopMonitor(): void {
     monitorTimer = null;
   }
   processMonitor(); // flush any decoded tail
+  terminal?.endLine(); // no more bytes can join the open line
+  publishLines();
   monitorActive.set(false);
   statusMessage.set("Serial monitor stopped.");
 }

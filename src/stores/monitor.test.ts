@@ -107,4 +107,26 @@ describe("serial monitor orchestration", () => {
     await running;
     expect(get(monitorActive)).toBe(false);
   });
+
+  // publishLines() shares closed lines (so the view can key its formatting cache
+  // on them) but copies the open one (so its row re-renders as it grows).
+  it("shares closed lines across publishes and copies the open one", async () => {
+    const cfg = get(monitorConfig);
+    const rate = pickMonitorRate(cfg.baud);
+    queued = [uartStream("Hi\nX", rate, cfg.baud)]; // "Hi" closes, "X" stays open
+
+    const running = startMonitor();
+    await vi.waitFor(() => expect(get(monitorLines)).toHaveLength(2), {
+      timeout: 2000,
+    });
+    const [closedBefore, openBefore] = get(monitorLines);
+
+    stopMonitor(); // publishes again
+    await running;
+    const [closedAfter, openAfter] = get(monitorLines);
+
+    expect(closedAfter).toBe(closedBefore);
+    expect(openAfter).not.toBe(openBefore);
+    expect(openAfter.id).toBe(openBefore.id); // still the same logical line
+  });
 });

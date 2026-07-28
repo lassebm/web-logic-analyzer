@@ -50,7 +50,11 @@ alone won't teach you. Read the files for the actual APIs.
   frame. Reuse the shared pieces rather than reinventing them: `InfoTip` (ⓘ popover),
   `EditableSelect` (preset dropdown with a "Custom…" text-entry escape hatch),
   `ConfirmButton` (arm-then-commit for actions that discard something).
-- `monitor/` — serial-monitor line assembly, pure/testable.
+- `monitor/` — serial-monitor line assembly, pure/testable. Two caps bound it, both
+  deliberately not user-configurable: lines and chars-per-line. A cap-split line is
+  flagged `continued`, so the view can show the split while `mergeContinued` gives the
+  export whole records — one definition of "one record" for both. The measurements behind
+  the caps are in the comments there and in `SerialMonitor`.
 - `stores/` — `session.ts` owns the device, the capture↔monitor mutual-exclusion flag,
   and decode orchestration. Hiding a channel also stops the decoders reading it —
   `decoderChannelsShown` is the shared predicate, used by both `runAllDecoders` and

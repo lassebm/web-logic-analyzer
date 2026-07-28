@@ -15,6 +15,7 @@ import {
   unsavedWorkReason,
 } from "./unloadGuard";
 import { packLevels } from "../test/waveforms";
+import { monitorLine } from "../test/fixtures";
 
 const idle = {
   captureStatus: "idle" as const,
@@ -118,7 +119,7 @@ describe("registerUnloadGuard", () => {
   });
 
   it("blocks unload when serial-monitor lines would be lost", () => {
-    monitorLines.set([{ t: 0, text: "hi", bytes: [104, 105], lastT: 0 }]);
+    monitorLines.set([monitorLine("hi")]);
     expect(fireUnload().defaultPrevented).toBe(true);
   });
 

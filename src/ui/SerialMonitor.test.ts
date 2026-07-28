@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import { tick } from "svelte";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import SerialMonitor from "./SerialMonitor.svelte";
 import { connStatus, captureStatus } from "../stores/session";
 import { monitorConfig, monitorActive, monitorLines } from "../stores/monitor";
+import { monitorLine } from "../test/fixtures";
 
 beforeEach(() => {
   connStatus.set("disconnected");
@@ -64,7 +65,7 @@ describe("SerialMonitor", () => {
   });
 
   it("requires a second click to clear a log (confirmable)", async () => {
-    monitorLines.set([{ t: 0, text: "hi", bytes: [104, 105], lastT: 0 }]);
+    monitorLines.set([monitorLine("hi")]);
     render(SerialMonitor);
     await fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(
@@ -81,7 +82,7 @@ describe("SerialMonitor", () => {
   // Starting wipes the lines, so it asks first once there are some.
   it("confirms before a Start discards the shown log", async () => {
     connStatus.set("ready");
-    monitorLines.set([{ t: 0, text: "hi", bytes: [104, 105], lastT: 0 }]);
+    monitorLines.set([monitorLine("hi")]);
     render(SerialMonitor);
 
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
@@ -100,5 +101,100 @@ describe("SerialMonitor", () => {
     // so the click is a no-op here beyond proving it wasn't intercepted).
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+  });
+
+  // A device that never sends a line-feed gets its line split at the char cap.
+  // Unmarked, the split reads as two unrelated messages.
+  it("marks a cap-split line as continuing the one above", async () => {
+    monitorLines.set([
+      monitorLine("abcd"),
+      monitorLine("efg", { continued: true }),
+    ]);
+    render(SerialMonitor);
+    await tick();
+    expect(screen.getAllByLabelText("continued line")).toHaveLength(1);
+  });
+
+  it("leaves ordinary lines unmarked", async () => {
+    monitorLines.set([monitorLine("abcd"), monitorLine("efg")]);
+    render(SerialMonitor);
+    await tick();
+    expect(screen.queryByLabelText("continued line")).not.toBeInTheDocument();
+  });
+
+  it("re-joins a cap-split line into one row on export", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    monitorConfig.update((c) => ({ ...c, showHex: true, showText: true }));
+    monitorLines.set([
+      monitorLine("abcd"),
+      monitorLine("efg", { continued: true }),
+    ]);
+    render(SerialMonitor);
+
+    await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalled());
+
+    const [header, ...rows] = writeText.mock.calls[0][0].split("\n");
+    expect(header).toBe("from_start\thex\ttext");
+    expect(rows).toHaveLength(1); // one logical record, not two
+    expect(rows[0]).toBe("0.000s\t61 62 63 64 65 66 67\tabcdefg");
+  });
+
+  // Rows re-render on item identity, so publishLines() gives the growing line a
+  // fresh object each tick. Same id, new object — the row must follow it.
+  it("updates the row of the line still being received", async () => {
+    const open = monitorLine("ab");
+    monitorLines.set([open]);
+    render(SerialMonitor);
+    await tick();
+    expect(screen.getByText("ab")).toBeInTheDocument();
+
+    monitorLines.set([{ ...open, text: "abc", bytes: [97, 98, 99] }]);
+    await tick();
+    expect(screen.getByText("abc")).toBeInTheDocument();
+    expect(screen.queryByText("ab")).not.toBeInTheDocument();
+  });
+
+  // The hex memo is keyed on the line object plus its byte count, so neither a
+  // longer copy nor a re-publish may serve a stale string.
+  it("refreshes the hex column as the open line grows", async () => {
+    monitorConfig.update((c) => ({ ...c, showHex: true, showText: false }));
+    const open = monitorLine("ab");
+    monitorLines.set([open]);
+    render(SerialMonitor);
+    await tick();
+    expect(screen.getByText("61 62")).toBeInTheDocument();
+
+    monitorLines.set([{ ...open, bytes: [97, 98, 99] }]);
+    await tick();
+    expect(screen.getByText("61 62 63")).toBeInTheDocument();
+  });
+
+  // Unchanged rows must not re-render when a line is appended — the scrollback
+  // is up to 10k rows and the poll runs 12x a second (see `rows` in the view).
+  it("re-renders only the changed row on a publish", async () => {
+    let reads = 0;
+    const lines = Array.from({ length: 50 }, (_, i) => {
+      const line = monitorLine(`line ${i}`);
+      let t = i * 0.01;
+      Object.defineProperty(line, "t", {
+        get: () => (reads++, t),
+        set: (v: number) => (t = v),
+        enumerable: true,
+      });
+      return line;
+    });
+    monitorLines.set(lines.slice());
+    render(SerialMonitor);
+    await tick();
+
+    reads = 0;
+    monitorLines.set([...lines, monitorLine("new")]);
+    await tick();
+    expect(reads).toBe(0); // none of the 50 existing rows re-read their fields
   });
 });

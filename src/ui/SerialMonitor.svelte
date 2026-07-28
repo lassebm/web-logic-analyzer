@@ -12,7 +12,12 @@
     setNewlineOnIdle,
     pickMonitorRate,
   } from "../stores/monitor";
-  import { neutralizeFormula } from "../monitor/terminal";
+  import {
+    neutralizeFormula,
+    mergeContinued,
+    MAX_LINE_CHARS,
+    type MonitorLine,
+  } from "../monitor/terminal";
   import { CHANNEL_NAMES, NUM_CHANNELS } from "../usb/constants";
   import { formatSampleRate } from "../usb/sampleRate";
   import { downloadText } from "../export/download";
@@ -45,8 +50,28 @@
   }
   const fmtFromStart = (t: number) => `${t.toFixed(3)}s`;
   const fmtSinceLast = (dt: number) => `+${dt.toFixed(3)}s`;
-  const fmtHex = (bytes: number[]) =>
-    bytes.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+
+  // Svelte re-evaluates every row's expressions on each publish, so building hex
+  // per tick is O(total bytes) — measured at 30 ms for 10k x 80-byte lines, a
+  // third of the main thread, which risks stalling the FX2 FIFO (see the O(chunk)
+  // rule in AGENTS.md). Memoized instead: only the last line grows, so the byte
+  // count is a sufficient cache key, and a WeakMap lets trimmed lines be freed.
+  const hexCache = new WeakMap<MonitorLine, { n: number; s: string }>();
+  function fmtHex(line: MonitorLine): string {
+    const hit = hexCache.get(line);
+    if (hit && hit.n === line.bytes.length) return hit.s;
+    const s = line.bytes
+      .map((b) => b.toString(16).toUpperCase().padStart(2, "0"))
+      .join(" ");
+    hexCache.set(line, { n: line.bytes.length, s });
+    return s;
+  }
+
+  // Iterated by the terminal's {#each} instead of the store directly. Reading a
+  // store inside an each-expression makes Svelte treat every item as mutable, so
+  // it marks all rows dirty on every publish; via a $derived the items compare by
+  // identity and only the rows that actually changed re-render.
+  let rows = $derived($monitorLines);
 
   let effectiveRate = $derived(pickMonitorRate($monitorConfig.baud));
   let canStart = $derived(
@@ -54,24 +79,26 @@
   );
 
   function buildExport(): string {
+    const cfg = $monitorConfig;
     const header: string[] = [];
-    if ($monitorConfig.tsWall) header.push("wall");
-    if ($monitorConfig.tsFromStart) header.push("from_start");
-    if ($monitorConfig.tsSinceLast) header.push("since_last");
-    if ($monitorConfig.showHex) header.push("hex");
-    if ($monitorConfig.showText) header.push("text");
-    const out = [header.join("\t")];
-    $monitorLines.forEach((line, i) => {
+    if (cfg.tsWall) header.push("wall");
+    if (cfg.tsFromStart) header.push("from_start");
+    if (cfg.tsSinceLast) header.push("since_last");
+    if (cfg.showHex) header.push("hex");
+    if (cfg.showText) header.push("text");
+
+    // Export logical records, not scrollback rows: a cap-split line rejoins the
+    // one it was split from, so it never reads as a second message.
+    const body = mergeContinued($monitorLines).map((line) => {
       const row: string[] = [];
-      if ($monitorConfig.tsWall) row.push(fmtWall($monitorStartEpoch, line.t));
-      if ($monitorConfig.tsFromStart) row.push(fmtFromStart(line.t));
-      if ($monitorConfig.tsSinceLast)
-        row.push(fmtSinceLast(i > 0 ? line.t - $monitorLines[i - 1].t : 0));
-      if ($monitorConfig.showHex) row.push(fmtHex(line.bytes));
-      if ($monitorConfig.showText) row.push(neutralizeFormula(line.text));
-      out.push(row.join("\t"));
+      if (cfg.tsWall) row.push(fmtWall($monitorStartEpoch, line.t));
+      if (cfg.tsFromStart) row.push(fmtFromStart(line.t));
+      if (cfg.tsSinceLast) row.push(fmtSinceLast(line.dt));
+      if (cfg.showHex) row.push(fmtHex(line));
+      if (cfg.showText) row.push(neutralizeFormula(line.text));
+      return row.join("\t");
     });
-    return out.join("\n");
+    return [header.join("\t"), ...body].join("\n");
   }
 
   // Both Clear and Start throw the log away, so both ask first (ConfirmButton) —
@@ -100,6 +127,14 @@
         : "",
   );
 </script>
+
+<!-- Marks a row the char cap split off the one above, so a device that never
+     sends a line-feed doesn't look like it sent two unrelated records. -->
+{#snippet contMark()}<span
+    class="cont"
+    title={`Continues the line above — it reached the ${MAX_LINE_CHARS}-character limit with no line-feed`}
+    aria-label="continued line">↳</span
+  >{/snippet}
 
 <div class="monitor">
   <div class="settings">
@@ -247,7 +282,7 @@
   </div>
 
   <div class="term mono" bind:this={termEl} onscroll={onScroll}>
-    {#each $monitorLines as line, i (i)}
+    {#each rows as line (line.id)}
       <div class="row">
         {#if $monitorConfig.tsWall}<span class="col ts"
             >{fmtWall($monitorStartEpoch, line.t)}</span
@@ -256,12 +291,15 @@
             >{fmtFromStart(line.t)}</span
           >{/if}
         {#if $monitorConfig.tsSinceLast}<span class="col ts"
-            >{fmtSinceLast(i > 0 ? line.t - $monitorLines[i - 1].t : 0)}</span
+            >{fmtSinceLast(line.dt)}</span
           >{/if}
         {#if $monitorConfig.showHex}<span class="col hex"
-            >{fmtHex(line.bytes)}</span
+            >{#if line.continued && !$monitorConfig.showText}{@render contMark()}{/if}{fmtHex(
+              line,
+            )}</span
           >{/if}
-        {#if $monitorConfig.showText}<span class="col txt">{line.text}</span
+        {#if $monitorConfig.showText}<span class="col txt"
+            >{#if line.continued}{@render contMark()}{/if}{line.text}</span
           >{/if}
       </div>
     {/each}
@@ -342,14 +380,30 @@
     user-select: none;
     white-space: nowrap;
   }
+  /* Hugs its content like a fixed column while it is short, but must be allowed
+     to shrink and wrap: a line the char cap split is 4096 bytes, i.e. ~12k hex
+     characters. Without the cap the row overflows, and .txt (zero flex-basis)
+     then gets no space at all and renders blank. Breaking at the spaces between
+     bytes rather than mid-byte overrides .row's break-all, which is there for
+     decoded text that may have no spaces at all. */
   .col.hex {
     color: var(--warn);
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 50%;
     white-space: pre-wrap;
+    word-break: normal;
   }
   .col.txt {
     color: var(--fg);
     flex: 1;
+    min-width: 0;
+  }
+  /* Not selectable: copying the text column shouldn't pick up the marker. */
+  .cont {
+    color: var(--fg-dim);
+    user-select: none;
+    margin-right: 4px;
   }
   .hint {
     color: var(--fg-dim);
