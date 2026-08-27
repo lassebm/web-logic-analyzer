@@ -2,6 +2,7 @@
 // viewport width. Reads/writes the view stores owned by session.ts.
 import { derived, get, writable } from "svelte/store";
 import {
+  capabilities,
   captureBuffer,
   captureStatus,
   captureTick,
@@ -205,17 +206,28 @@ export function resetViewForCapture(): void {
 // streamed chunk. captureTick also bumps once at finalize (status is "done" by
 // then, so this stays out of the way and finalizeCapture's own fit wins).
 let wasRunning = false;
+/**
+ * Whether to roll the view as samples arrive. `follow` outlives a device change,
+ * so it needs gating on the device too: a one-shot device delivers a finished
+ * capture in one chunk, where following would mean a full windowed decode per
+ * capture — the O(capture) work the pager exists to defer. The toolbar hides the
+ * toggle for those; this makes the behaviour match.
+ */
+function following(): boolean {
+  return get(follow) && get(capabilities).streaming;
+}
+
 captureStatus.subscribe(($status) => {
   const running = $status === "running";
   if (running && !wasRunning) {
     // The activity cursor is reset by the viewFitsWhole subscription on finalize.
-    if (get(follow)) followView();
+    if (following()) followView();
     else resetViewForCapture();
   }
   wasRunning = running;
 });
 captureTick.subscribe(() => {
-  if (get(follow) && get(captureStatus) === "running") {
+  if (following() && get(captureStatus) === "running") {
     followView();
     liveDecodeInView();
   }

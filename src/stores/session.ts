@@ -1,16 +1,23 @@
 import { get, writable, derived } from "svelte/store";
-import { Fx2Device } from "../usb/fx2Device";
-import {
-  needsFirmware,
-  uploadFirmware,
-  waitForReenumeration,
-} from "../usb/firmware";
-import { loadFirmware, type StoredFirmware } from "../usb/firmwareStore";
-import { loadBundledFirmware } from "../firmware";
-import { CaptureSession, getFirmwareVersion, getRevId } from "../usb/capture";
+import { firmwareInfo, refreshFirmware } from "../usb/firmwareState";
 import { CaptureBuffer } from "../model/capture";
 import { findTrigger, type TriggerSpec } from "../model/trigger";
-import { NUM_CHANNELS, PRE_FIRMWARE_DEVICES } from "../usb/constants";
+import { NUM_CHANNELS } from "../device/channels";
+import {
+  BACKENDS,
+  DEFAULT_BACKEND_ID,
+  getBackend,
+  isBackendId,
+} from "../device/registry";
+import type {
+  Acquisition,
+  BackendId,
+  ConnectContext,
+  ConnectResult,
+  DeviceBackend,
+  DeviceCapabilities,
+  LogicDevice,
+} from "../device/types";
 import { formatSampleRate } from "../usb/sampleRate";
 import { runDecoder, runStacked } from "../decode/engine";
 import { getDecoder } from "../decode/registry";
@@ -33,6 +40,77 @@ export interface CaptureConfigState {
   sampleLimit: number;
   enabledChannels: boolean[];
   trigger: TriggerSpec;
+  /** How many captures one Run takes. `CAPTURES_UNTIL_STOPPED` = keep going. */
+  captures: number;
+}
+
+/**
+ * Repeat until the user stops (or the trigger fires). Zero rather than Infinity
+ * so the value survives a structured clone and reads as a plain option value.
+ */
+export const CAPTURES_UNTIL_STOPPED = 0;
+
+/** Selectable capture counts, in the order the toolbar lists them. */
+export const CAPTURE_COUNTS = [1, 2, 5, 10, 25, 50, CAPTURES_UNTIL_STOPPED];
+
+/**
+ * One finished capture in a repeat run. Each is an ordinary `CaptureBuffer`, so
+ * paging to it is just swapping `captureBuffer` — the renderer, decoders,
+ * measurements, detection and export all keep working with no notion of
+ * captures at all.
+ */
+export interface CaptureRecord {
+  buffer: CaptureBuffer;
+  /** ms after the run started that this capture completed. */
+  atMs: number;
+  /** Sample the trigger matched at, or null if it never did. */
+  trigger: number | null;
+}
+
+/**
+ * Total samples held across retained captures before the oldest are dropped.
+ * "Until stopped" is otherwise unbounded; this is one FX2 max-length capture's
+ * worth, so a single deep capture always fits.
+ */
+const MAX_RETAINED_SAMPLES = 100_000_000;
+
+/**
+ * Captures retained regardless of size. The sample budget alone doesn't bound
+ * an "until stopped" run of very short captures, and the list is copied on every
+ * one — so without a count cap a long run degrades quadratically.
+ */
+const MAX_RETAINED_CAPTURES = 200;
+
+/**
+ * Largest capture decoded as it lands, mid-run. The capture is on screen, so
+ * empty decoder lanes under a drawn waveform look half-rendered — and with
+ * "until stopped" the decoded bytes are how you decide to stop. Bounded because
+ * the same loop serves the FX2, where a capture can be 100M samples and
+ * decoding each would dominate the run; those wait for the pager to select
+ * them. Matches the live in-view decode's budget (MAX_LIVE_DECODE_SAMPLES).
+ */
+const MAX_LANDED_DECODE_SAMPLES = 2_000_000;
+
+/**
+ * Drop the oldest captures until the run fits both budgets. The newest are the
+ * ones worth keeping: with a trigger set the run ends on the interesting one,
+ * and without one you are watching the live view for what just happened.
+ */
+export function trimRetained(
+  records: CaptureRecord[],
+  maxSamples = MAX_RETAINED_SAMPLES,
+  maxCount = MAX_RETAINED_CAPTURES,
+): CaptureRecord[] {
+  let total = records.reduce((n, r) => n + r.buffer.sampleCount, 0);
+  let from = 0;
+  while (
+    records.length - from > 1 &&
+    (total > maxSamples || records.length - from > maxCount)
+  ) {
+    total -= records[from].buffer.sampleCount;
+    from++;
+  }
+  return from === 0 ? records : records.slice(from);
 }
 
 export interface DecoderInstance {
@@ -54,21 +132,78 @@ export interface DecoderInstance {
 export const connStatus = writable<ConnStatus>("disconnected");
 export const statusMessage = writable<string>("");
 export const deviceLabel = writable<string>("");
-export const firmwareInfo = writable<StoredFirmware | null>(null);
 export const fwUploadProgress = writable<number>(0); // 0..1
+
+// Owned by usb/firmwareState.ts (device/fx2.ts reads it during a connect, and
+// this module imports the backend registry) — re-exported so the UI still gets
+// all its session state from here.
+export { firmwareInfo, refreshFirmware };
+
+/** Which hardware family Connect talks to. Remembered across sessions, because
+ *  a given user almost always has the same device on the bench. */
+const BACKEND_STORAGE_KEY = "wla.backend";
+
+function storedBackendId(): BackendId {
+  try {
+    const saved = localStorage.getItem(BACKEND_STORAGE_KEY);
+    if (isBackendId(saved)) return saved;
+  } catch {
+    /* storage blocked (private mode, or no DOM at all) */
+  }
+  return DEFAULT_BACKEND_ID;
+}
+
+export const backendId = writable<BackendId>(storedBackendId());
+
+/**
+ * What the connected device can do — or, while disconnected, what the selected
+ * backend offers. Never null, so the toolbar has a rate/sample-count list to
+ * render before anything is plugged in.
+ */
+export const capabilities = writable<DeviceCapabilities>(
+  getBackend(get(backendId)).defaultCapabilities,
+);
 
 export const config = writable<CaptureConfigState>({
   sampleRate: 1_000_000,
   sampleLimit: 1_000_000,
   enabledChannels: Array(NUM_CHANNELS).fill(true),
   trigger: { conditions: [] },
+  captures: 1,
 });
+
+// The literal above is written for the FX2 defaults, but the remembered backend
+// may be another one — so bring it into range right away rather than waiting for
+// a connect. Without this, a page that opens in SUMP mode renders an empty
+// sample-count <select>: nothing in [1024, 4096] matches a 1,000,000 limit.
+applyCapabilities(get(capabilities));
 
 export const captureStatus = writable<CaptureStatus>("idle");
 export const captureBuffer = writable<CaptureBuffer | null>(null);
 export const captureTick = writable<number>(0); // bumped as samples stream in
 export const captureSamples = writable<number>(0); // live count of collected samples
 export const triggerSample = writable<number | null>(null);
+
+/** Captures from the last run, oldest first. One entry for a plain single Run. */
+export const captures = writable<CaptureRecord[]>([]);
+/** 1-based index of the displayed capture; 0 when there are none. */
+export const captureCursor = writable<number>(0);
+
+/** The pager readout, or null when there is nothing to page through. */
+export const capturePosition = derived(
+  [captures, captureCursor],
+  ([$captures, $cursor]) =>
+    $captures.length > 1
+      ? {
+          index: $cursor,
+          total: $captures.length,
+          /** How many of the run's captures met the trigger condition. */
+          triggered: $captures.filter((c) => c.trigger !== null).length,
+          /** Whether the one on screen did. */
+          currentTriggered: $captures[$cursor - 1]?.trigger != null,
+        }
+      : null,
+);
 
 /** Where the current on-screen buffer came from. Distinguishes a real capture
  *  (measured against the configured sample limit — the source of the progress
@@ -104,12 +239,25 @@ export const viewportWidth = writable<number>(800); // waveform canvas width in 
  */
 export const viewFitsWhole = writable<boolean>(false);
 
-/** What starting a capture would overwrite; drives the Run button's confirm
- *  step. `captureTick` is a dependency because the buffer fills by mutation. */
+/**
+ * Samples a Run is holding, across *every* capture it took — not just the one on
+ * screen. A run that was stopped can leave the newest capture short or empty
+ * while earlier ones hold real data, so counting only the displayed buffer would
+ * report nothing to lose. `captureTick` is a dependency because buffers fill by
+ * mutation rather than by being re-set.
+ */
+export const capturedSamples = derived(
+  [captureTick, captureBuffer, captures],
+  ([, $buffer, $captures]) =>
+    $captures.length > 0
+      ? $captures.reduce((n, r) => n + r.buffer.sampleCount, 0)
+      : ($buffer?.sampleCount ?? 0),
+);
+
+/** What starting a capture would overwrite; drives the Run button's confirm step. */
 export const unsavedCapture = derived(
-  [captureTick, captureBuffer, sampleSource],
-  ([, $buffer, $source]) =>
-    isTabOnlyCapture($source, $buffer?.sampleCount ?? 0),
+  [capturedSamples, sampleSource],
+  ([$samples, $source]) => isTabOnlyCapture($source, $samples),
 );
 
 // Master enable for decoding; each DecoderInstance can also be toggled on/off
@@ -122,34 +270,116 @@ export const decodersEnabled = writable<boolean>(true);
 // baud/framing. Empty array = scan ran and found nothing; null = not scanned yet.
 export const detections = writable<Detection[] | null>(null);
 
-let device: Fx2Device | null = null;
-let session: CaptureSession | null = null;
+let device: LogicDevice | null = null;
+let session: Acquisition | null = null;
 let uidCounter = 0;
 
 /** The connected device, or null. Used by the serial monitor (stores/monitor.ts). */
-export function connectedDevice(): Fx2Device | null {
+export function connectedDevice(): LogicDevice | null {
   return device;
 }
 
-// --- Firmware ---
-export async function refreshFirmware(): Promise<void> {
-  firmwareInfo.set(await loadFirmware());
+function currentBackend(): DeviceBackend {
+  return getBackend(get(backendId));
+}
+
+/**
+ * Switch hardware family. Refused while connected — the selector is disabled
+ * then, and the guard keeps a stale `device` from outliving its backend.
+ */
+export function setBackend(id: BackendId): void {
+  if (device || get(backendId) === id) return;
+  backendId.set(id);
+  try {
+    localStorage.setItem(BACKEND_STORAGE_KEY, id);
+  } catch {
+    /* storage blocked */
+  }
+  applyCapabilities(getBackend(id).defaultCapabilities);
+  connStatus.set("disconnected");
+  statusMessage.set("");
 }
 
 // --- Connection ---
+
+/** Lets a backend report progress without reaching into these stores itself. */
+function connectContext(): ConnectContext {
+  return {
+    status: (message) => statusMessage.set(message),
+    progress: (fraction) => fwUploadProgress.set(fraction),
+  };
+}
+
+/**
+ * Publish a capability set and bring the config into range for it. Without the
+ * clamp, switching to a device with a different rate/sample-count list leaves
+ * those `<select>`s showing nothing (no option matches the held value), and a
+ * trigger could still name a channel the device doesn't have.
+ */
+function applyCapabilities(caps: DeviceCapabilities): void {
+  capabilities.set(caps);
+  config.update((cfg) => ({
+    ...cfg,
+    sampleRate: nearestOption(caps.sampleRates, cfg.sampleRate),
+    sampleLimit: nearestOption(caps.sampleLimits, cfg.sampleLimit),
+    // A device change resets the channel selection to "everything this device
+    // has", rather than carrying over hiding that was about other hardware.
+    enabledChannels: Array.from(
+      { length: NUM_CHANNELS },
+      (_, ch) => ch < caps.channels,
+    ),
+    trigger: {
+      conditions: cfg.trigger.conditions.filter(
+        (c) => c.channel < caps.channels,
+      ),
+    },
+  }));
+}
+
+/** The largest offered value at or below `value`, else the smallest offered. */
+function nearestOption(options: number[], value: number): number {
+  if (options.length === 0 || options.includes(value)) return value;
+  const below = options.filter((o) => o <= value);
+  return below.length > 0 ? Math.max(...below) : Math.min(...options);
+}
+
+function adopt(dev: LogicDevice): void {
+  device = dev;
+  applyCapabilities(dev.capabilities);
+  connStatus.set("ready");
+  deviceLabel.set(dev.label);
+  statusMessage.set("Ready");
+}
+
+/** Map a backend's connect outcome onto the connection status the bar renders. */
+function applyResult(result: ConnectResult): void {
+  switch (result.kind) {
+    case "device":
+      adopt(result.device);
+      break;
+    case "reselect":
+      connStatus.set("reselect");
+      statusMessage.set(result.message);
+      break;
+    case "need-firmware":
+      connStatus.set("need-firmware");
+      statusMessage.set(result.message);
+      break;
+    case "none":
+      break;
+  }
+}
+
 export async function connect(): Promise<void> {
-  if (!Fx2Device.isSupported()) {
+  const backend = currentBackend();
+  if (!backend.isSupported()) {
     connStatus.set("error");
-    statusMessage.set(
-      "WebUSB is not available. Use Chrome, Edge, or another Chromium browser.",
-    );
+    statusMessage.set(backend.unsupportedMessage);
     return;
   }
   try {
     connStatus.set("connecting");
-    statusMessage.set("Requesting device…");
-    const dev = await Fx2Device.request();
-    await provision(dev);
+    applyResult(await backend.connect(connectContext()));
   } catch (err) {
     connStatus.set("error");
     statusMessage.set(friendlyError(err));
@@ -159,20 +389,16 @@ export async function connect(): Promise<void> {
 /**
  * Complete setup after a firmware upload whose re-enumerated device could not
  * reconnect automatically (its running-fx2lafw identity was never granted to
- * this origin — see provision()). Must run from a user gesture: prompts the
- * standard device chooser, where the just-re-enumerated device now appears.
- * Selecting it grants (and persists) that identity, so later reconnects are
- * silent. Uses the full filters — a running device doesn't reliably present a
- * POST_FIRMWARE_DEVICES VID:PID, so a narrowed chooser can come up empty.
- * A cancelled chooser drops back to "reselect" so the user can retry, rather
- * than the dead-end "error" state.
+ * this origin). Must run from a user gesture: prompts the standard device
+ * chooser, where the just-re-enumerated device now appears. Selecting it grants
+ * (and persists) that identity, so later reconnects are silent. A cancelled
+ * chooser drops back to "reselect" so the user can retry, rather than the
+ * dead-end "error" state.
  */
 export async function finishConnect(): Promise<void> {
   try {
     connStatus.set("connecting");
-    statusMessage.set("Requesting device…");
-    const dev = await Fx2Device.request();
-    await provision(dev);
+    applyResult(await currentBackend().connect(connectContext()));
   } catch (err) {
     if (isNoDeviceSelected(err)) {
       connStatus.set("reselect");
@@ -188,96 +414,22 @@ export async function finishConnect(): Promise<void> {
 
 /** Try to reconnect to an already-authorized, ready device without a prompt. */
 export async function tryReconnect(): Promise<void> {
-  const authorized = await Fx2Device.getAuthorized();
-  const ready = authorized.find((d) => !needsFirmware(d));
-  if (ready) {
-    try {
-      await provision(ready);
-    } catch {
-      /* ignore silent reconnect failures */
-    }
-  }
-}
-
-async function provision(dev: Fx2Device): Promise<void> {
-  await dev.open();
-
-  if (needsFirmware(dev)) {
-    const match = PRE_FIRMWARE_DEVICES.find(
-      (d) => d.vendorId === dev.vendorId && d.productId === dev.productId,
-    );
-
-    // Prefer a user-supplied custom firmware; otherwise use the bundled image
-    // that matches this device's VID:PID.
-    const custom = get(firmwareInfo) ?? (await loadFirmware());
-    let image: ArrayBuffer | null = custom?.data ?? null;
-    let source = custom ? `custom (${custom.name})` : "";
-    if (!image && match) {
-      image = await loadBundledFirmware(match.firmware);
-      if (image) source = `bundled ${match.firmware}`;
-    }
-
-    if (!image) {
-      const idHex = `${hex4(dev.vendorId)}:${hex4(dev.productId)}`;
-      const hint = match
-        ? ` For this device (${idHex}, ${match.name}) use ${match.firmware}.`
-        : "";
-      connStatus.set("need-firmware");
-      statusMessage.set(
-        `This device needs fx2lafw firmware, and no bundled match was found.${hint} Download it (link in the top bar), load the .fw, then Connect again.`,
-      );
-      await dev.close();
-      return;
-    }
-
-    statusMessage.set(`Uploading firmware — ${source}…`);
-    fwUploadProgress.set(0);
-    await uploadFirmware(dev, image, (done, total) =>
-      fwUploadProgress.set(done / total),
-    );
-    await dev.close();
-
-    // Wait for the device to come back under its running-fx2lafw identity. This
-    // succeeds automatically only if this origin already holds permission for
-    // that identity (repeat connects in a normal window). On the first connect —
-    // and every incognito session — the re-enumerated device's VID:PID was never
-    // granted, so getDevices() can't surface it and this times out: we then ask
-    // for one confirming pick via finishConnect() rather than dead-ending.
-    statusMessage.set("Waiting for device to re-enumerate…");
-    const reenum = await waitForReenumeration();
-    if (!reenum) {
-      connStatus.set("reselect");
-      statusMessage.set(
-        "Firmware uploaded. Click “Finish connecting” and pick the device from the list.",
-      );
-      return;
-    }
-    device = reenum;
-  } else {
-    device = dev;
-  }
-
-  await device.claim();
-  const ver = await getFirmwareVersion(device);
-  let revid = -1;
+  const backend = currentBackend();
+  if (!backend.isSupported()) return;
   try {
-    revid = await getRevId(device);
+    applyResult(await backend.reconnect(connectContext()));
   } catch {
-    /* optional */
+    /* ignore silent reconnect failures */
   }
-  connStatus.set("ready");
-  deviceLabel.set(
-    `${device.productName ?? "fx2lafw"} — fw ${ver.major}.${ver.minor}${revid >= 0 ? `, rev ${revid}` : ""}`,
-  );
-  statusMessage.set("Ready");
 }
 
 export async function disconnect(): Promise<void> {
   session?.stop();
+  session = null;
   if (device) {
-    await device.release();
-    await device.close();
-    device = null;
+    const dev = device;
+    device = null; // drop the reference first, so a close() failure still frees it
+    await dev.close();
   }
   connStatus.set("disconnected");
   deviceLabel.set("");
@@ -285,12 +437,12 @@ export async function disconnect(): Promise<void> {
 }
 
 /**
- * React to the physical device being unplugged. WebUSB fires `disconnect` on
- * `navigator.usb`; we can't release/close a device that's already gone, so we
- * just drop our references and reset status. Ignores unrelated devices.
+ * React to the device physically going away (WebUSB `disconnect`, or Web
+ * Serial's). We can't release or close something that's already gone, so we
+ * just drop our references and reset status.
  */
-function onUsbDisconnect(event: { device?: USBDevice }): void {
-  if (!device || event.device !== device.device) return;
+function onDeviceLost(dev: LogicDevice): void {
+  if (dev !== device) return;
   session?.stop();
   session = null;
   device = null;
@@ -299,80 +451,260 @@ function onUsbDisconnect(event: { device?: USBDevice }): void {
   statusMessage.set("Device disconnected. Replug it and Connect again.");
 }
 
-let disconnectTarget: USB | null = null;
-
 /**
- * Register the `navigator.usb` disconnect listener so unplugging the device is
- * reflected in the UI. Called from the device bar on mount. Idempotent per
- * `navigator.usb` object (re-registers only if it is swapped, e.g. in tests).
+ * Register the disconnect listeners so unplugging the device shows up in the UI.
+ * Called from the device bar on mount, for *every* supported backend — each only
+ * reports devices it handed out, so this stays correct across a backend switch.
+ * The backends make it idempotent per event target.
  */
-export function watchUsbDisconnect(): void {
-  const usb = navigator.usb;
-  if (!usb || typeof usb.addEventListener !== "function") return;
-  if (disconnectTarget === usb) return;
-  disconnectTarget = usb;
-  usb.addEventListener("disconnect", onUsbDisconnect as EventListener);
+export function watchDeviceDisconnect(): void {
+  for (const backend of BACKENDS) {
+    if (backend.isSupported()) backend.watchDisconnect(onDeviceLost);
+  }
 }
 
 // --- Capture ---
+
+/** Set by stopCapture(); ends a repeat run after the in-flight capture. */
+let repeatStopped = false;
+
+/**
+ * Where the trigger matched, or null for "this capture wasn't triggered".
+ *
+ * `findTrigger` reports a match at sample 0 for an *empty* spec — its way of
+ * saying "start at the beginning" — so calling it unguarded draws a marker and
+ * relabels the ruler "Time (from trigger)" on a capture nobody triggered.
+ */
+function triggerMatch(buf: CaptureBuffer, spec: TriggerSpec): number | null {
+  if (spec.conditions.length === 0) return null;
+  const at = findTrigger(buf, spec);
+  return at >= 0 ? at : null;
+}
+
+/**
+ * Run one or more captures back to back.
+ *
+ * Two rules hold the repeat loop together. `captureStatus` stays "running" for
+ * the whole run, which is what lets the follow view and the live in-view decode
+ * roll across capture boundaries — that live view being the point of "until
+ * stopped". And a finished capture is never fitted or fully decoded mid-run:
+ * that is O(capture) work on a buffer nobody is looking at. Decoding happens on
+ * selection, and once at the end.
+ */
 export async function startCapture(): Promise<void> {
-  if (!device || get(monitorActive)) return;
+  // A run already in flight owns `session` and `repeatStopped`; a second one
+  // would drive the same device concurrently and leave Stop reaching only one
+  // of them. Matches startMonitor()'s guard.
+  if (!device || get(monitorActive) || get(captureStatus) === "running") return;
+  const dev = device;
   const cfg = get(config);
-  const buf = new CaptureBuffer(
-    cfg.sampleRate,
-    Math.min(cfg.sampleLimit, 1 << 24),
-  );
-  captureBuffer.set(buf);
+  const caps = dev.capabilities;
+  // The device's own divider decides the real rate; that, not the request, is
+  // what the buffer's time axis has to be built from.
+  const sampleRate = dev.resolveSampleRate(cfg.sampleRate);
+  const target = cfg.captures;
+  const hasTrigger = cfg.trigger.conditions.length > 0;
+  // An open-ended run ends on a trigger match — that is what "until stopped" is
+  // for. A fixed count means "give me this many" and runs to completion, which
+  // is how you collect occurrences to compare; on a hardware-trigger device
+  // every capture is a triggered one, so stopping at the first would cap every
+  // run at one.
+  const stopOnTrigger = target === CAPTURES_UNTIL_STOPPED && hasTrigger;
+
+  // Run discards what is on screen, and the button has just had exactly that
+  // confirmed, so it all goes now — keeping the old trace up while a one-shot
+  // device fills its memory was tried and contradicts that promise.
+  captures.set([]);
+  captureCursor.set(0);
   sampleSource.set("capture");
-  triggerSample.set(null);
-  captureSamples.set(0);
-  // Drop the previous capture's decoded annotations so stale results don't show.
   decoders.update((list) => list.map((d) => ({ ...d, annotations: [] })));
   detections.set(null); // previous scan no longer applies to the new capture
   captureStatus.set("running");
-  statusMessage.set("Capturing…");
+  repeatStopped = false;
 
-  session = new CaptureSession(
-    device,
-    { sampleRate: cfg.sampleRate, sampleLimit: cfg.sampleLimit },
-    {
-      onData: (chunk) => {
-        buf.append(chunk);
-        captureTick.update((n) => n + 1);
+  // *Within* a run, a finished capture stays up until the next one's samples
+  // arrive. Swapping the next (empty) buffer in at once — the obvious thing —
+  // happens in the same tick as the previous capture's `captureTick`, before the
+  // coalesced redraw runs, so that capture is replaced before it is ever drawn.
+  let shown: CaptureBuffer | null = null;
+  const showCapture = (buf: CaptureBuffer) => {
+    shown = buf;
+    captureBuffer.set(buf);
+    triggerSample.set(null);
+  };
+
+  const startedAt = Date.now();
+  let records: CaptureRecord[] = [];
+  let deviceLost = false;
+  let failure: string | null = null;
+  let index = 0;
+
+  while (
+    !repeatStopped &&
+    (target === CAPTURES_UNTIL_STOPPED || index < target)
+  ) {
+    index++;
+    const buf = new CaptureBuffer(
+      sampleRate,
+      Math.min(cfg.sampleLimit, 1 << 24),
+    );
+    captureSamples.set(0);
+    // The first capture blanks the view the run started by discarding; a
+    // streaming device fills in from its first chunk, so it takes it at once too.
+    if (caps.streaming || index === 1) showCapture(buf);
+    statusMessage.set(armingMessage(caps, cfg, index, target));
+
+    session = dev.acquire(
+      { sampleRate, sampleLimit: cfg.sampleLimit, trigger: cfg.trigger },
+      {
+        onData: (chunk) => {
+          if (shown !== buf) showCapture(buf);
+          buf.append(chunk);
+          captureTick.update((n) => n + 1);
+        },
+        onProgress: (n) => {
+          captureSamples.set(n);
+          // A buffered dump has no live waveform to watch, so the status line is
+          // the only progress there is while it uploads.
+          if (!caps.streaming) {
+            statusMessage.set(
+              `${capturePrefix(index, target)}reading ${n.toLocaleString()} of ${cfg.sampleLimit.toLocaleString()} samples…`,
+            );
+          }
+        },
+        onError: (err) => {
+          captureStatus.set("error");
+          statusMessage.set(friendlyError(err));
+        },
       },
-      onProgress: (n) => captureSamples.set(n),
-      onError: (err) => {
-        captureStatus.set("error");
-        statusMessage.set(friendlyError(err));
-      },
-    },
-  );
+    );
 
-  await session.run();
-  session = null;
+    await session.run();
+    session = null;
 
-  // A mid-capture unplug nulls `device` (see onUsbDisconnect). Keep the partial
-  // capture, but let the disconnect message stand rather than "Captured N".
-  const deviceLost = device === null;
-  // finalizeCapture ends with a "Captured N samples." status, which would bury a
-  // real error (nothing renders captureStatus === "error", so the message is the
-  // only surface) — so re-assert it afterwards, as the unplug case already does.
-  const failure = get(captureStatus) === "error" ? get(statusMessage) : null;
+    // A mid-capture unplug nulls `device` (see onDeviceLost). Keep the partial
+    // capture, but let the disconnect message stand rather than "Captured N".
+    deviceLost = device === null;
+    // A real error must not be buried by the finalize status (nothing renders
+    // captureStatus === "error", so the message is the only surface).
+    if (get(captureStatus) === "error") failure = get(statusMessage);
+
+    // A capture that produced nothing is not a capture. Stopping while a device
+    // is still filling its own memory lands here routinely, and recording the
+    // empty buffer would leave the pager sitting on a blank capture and hide the
+    // real ones behind it.
+    if (buf.sampleCount === 0) {
+      if (!failure && !deviceLost && !repeatStopped) {
+        // Nothing arrived and nobody asked us to stop: without this the loop
+        // would spin as fast as the event loop allows.
+        statusMessage.set("The device returned no samples — stopping.");
+      }
+      break;
+    }
+
+    const trig = triggerMatch(buf, cfg.trigger);
+    // The capture is on screen now, so finish rendering it: the trigger mark is
+    // free (the match was needed for the record anyway), and the decoder lanes
+    // follow when the capture is small enough to afford. Note this decodes but
+    // does *not* fit — refitting mid-run is what would fight the view.
+    triggerSample.set(trig);
+    if (buf.sampleCount <= MAX_LANDED_DECODE_SAMPLES) runAllDecoders();
+    records.push({ buffer: buf, atMs: Date.now() - startedAt, trigger: trig });
+    records = trimRetained(records);
+    captures.set([...records]);
+    captureCursor.set(records.length);
+
+    if (failure || deviceLost) break;
+    if (stopOnTrigger && trig !== null) break;
+  }
+
   if (get(captureStatus) === "running") captureStatus.set("done");
-  finalizeCapture(buf, cfg);
+  // Land on the newest capture that was actually kept — the in-flight one may
+  // have been discarded as empty.
+  const landed = records.at(-1)?.buffer ?? shown;
+  if (landed) {
+    captureBuffer.set(landed);
+    captureSamples.set(landed.sampleCount);
+    finalizeCapture(landed, cfg, records.length);
+  }
   if (failure) statusMessage.set(failure);
   if (deviceLost)
     statusMessage.set("Device disconnected — showing the partial capture.");
 }
 
+/** "Capture 3 of 10 — " while repeating, and nothing for a plain single Run. */
+function capturePrefix(index: number, target: number): string {
+  if (target === 1) return "";
+  const of = target === CAPTURES_UNTIL_STOPPED ? "" : ` of ${target}`;
+  return `Capture ${index}${of} — `;
+}
+
+/** What the status line says while a capture is being taken. A one-shot device
+ *  fills its own memory before uploading, so "Capturing…" would be misleading:
+ *  nothing is on its way yet, and with a trigger armed nothing may be for a
+ *  long while. */
+function armingMessage(
+  caps: DeviceCapabilities,
+  cfg: CaptureConfigState,
+  index: number,
+  target: number,
+): string {
+  const what = caps.streaming
+    ? "capturing…"
+    : caps.hardwareTrigger && cfg.trigger.conditions.length > 0
+      ? "armed — waiting for trigger…"
+      : "capturing into the device’s memory…";
+  const prefix = capturePrefix(index, target);
+  return prefix ? prefix + what : what[0].toUpperCase() + what.slice(1);
+}
+
 export function stopCapture(): void {
+  if (get(captureStatus) !== "running") return;
+  repeatStopped = true;
+  // Say so straight away: a device mid-capture owes us nothing until it has
+  // filled its memory, so the run can take a moment to unwind.
+  statusMessage.set("Stopping…");
   session?.stop();
 }
 
-function finalizeCapture(buf: CaptureBuffer, cfg: CaptureConfigState): void {
-  const trig = findTrigger(buf, cfg.trigger);
-  triggerSample.set(trig >= 0 ? trig : null);
-  fitAndDecode(buf, `Captured ${buf.sampleCount.toLocaleString()} samples.`);
+/**
+ * Show one capture from the last run. This is where a repeat run's decoding
+ * actually happens — see startCapture on why it can't happen per capture.
+ */
+export function selectCapture(index1: number): void {
+  const list = get(captures);
+  if (list.length === 0 || get(captureStatus) === "running") return;
+  const i = Math.max(1, Math.min(index1, list.length));
+  const rec = list[i - 1];
+  captureCursor.set(i);
+  captureBuffer.set(rec.buffer);
+  captureSamples.set(rec.buffer.sampleCount);
+  triggerSample.set(rec.trigger);
+  detections.set(null); // the previous scan described a different capture
+  fitAndDecode(
+    rec.buffer,
+    `Capture ${i} of ${list.length} — ${rec.buffer.sampleCount.toLocaleString()} samples at +${(rec.atMs / 1000).toFixed(2)} s.`,
+  );
+}
+
+/** Step the capture pager by `delta`. */
+export function stepCapture(delta: number): void {
+  selectCapture(get(captureCursor) + delta);
+}
+
+function finalizeCapture(
+  buf: CaptureBuffer,
+  cfg: CaptureConfigState,
+  count: number,
+): void {
+  triggerSample.set(triggerMatch(buf, cfg.trigger));
+  const samples = `${buf.sampleCount.toLocaleString()} samples`;
+  fitAndDecode(
+    buf,
+    count > 1
+      ? `Captured ${count} captures — showing ${count} of ${count} (${samples}).`
+      : `Captured ${samples}.`,
+  );
 }
 
 /**
@@ -406,6 +738,9 @@ export function loadCapture(
   sampleSource.set(source);
   captureSamples.set(buf.sampleCount);
   triggerSample.set(null);
+  // A loaded buffer replaces the whole run, not just the shown capture.
+  captures.set([]);
+  captureCursor.set(0);
   decoders.update((list) => list.map((d) => ({ ...d, annotations: [] })));
   detections.set(null);
   config.update((c) => ({ ...c, sampleRate: buf.sampleRate }));
@@ -527,8 +862,9 @@ export function decoderChannelsShown(
   return inst.channelMap.every((ch) => enabledChannels[ch] !== false);
 }
 
-/** Show/hide one capture channel: a view/decode/export filter (fx2lafw always
- *  streams all 8), so hiding one also stops the decoders reading it. */
+/** Show/hide one capture channel: a view/decode/export filter (the device sends
+ *  every channel it has regardless), so hiding one also stops the decoders
+ *  reading it. */
 export function setChannelEnabled(ch: number, on: boolean): void {
   const before = get(config).enabledChannels;
   config.update((cfg) => {
@@ -539,12 +875,16 @@ export function setChannelEnabled(ch: number, on: boolean): void {
   onChannelsChanged(before);
 }
 
-/** Show/hide every channel at once. */
+/** Show/hide every channel at once — "all" means all the device actually has. */
 export function setAllChannelsEnabled(on: boolean): void {
   const before = get(config).enabledChannels;
+  const channels = get(capabilities).channels;
   config.update((cfg) => ({
     ...cfg,
-    enabledChannels: Array(NUM_CHANNELS).fill(on),
+    enabledChannels: Array.from(
+      { length: NUM_CHANNELS },
+      (_, ch) => on && ch < channels,
+    ),
   }));
   onChannelsChanged(before);
 }
@@ -717,20 +1057,26 @@ function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function hex4(n: number): string {
-  return "0x" + n.toString(16).padStart(4, "0");
-}
-
 /** A cancelled/empty device chooser (user closed it without picking). */
 function isNoDeviceSelected(err: unknown): boolean {
   const m = errMsg(err).toLowerCase();
-  return m.includes("no device selected") || m.includes("user gesture");
+  return (
+    m.includes("no device selected") ||
+    m.includes("no port selected") ||
+    m.includes("user gesture")
+  );
 }
 
-/** Translate common WebUSB errors into guidance a user can act on. */
+/** Translate common WebUSB / Web Serial errors into guidance a user can act on. */
 export function friendlyError(err: unknown): string {
   const raw = errMsg(err);
   const m = raw.toLowerCase();
+  if (m.includes("no port selected")) {
+    return "No serial port was selected.";
+  }
+  if (m.includes("failed to open serial port") || m.includes("already open")) {
+    return "Could not open the serial port — something else is using it (a terminal, PulseView, the Arduino IDE). Close it, then Connect again.";
+  }
   if (
     m.includes("unable to set device configuration") ||
     m.includes("unable to claim") ||

@@ -1,5 +1,5 @@
 // Shared non-waveform test fixtures.
-import { NUM_CHANNELS } from "../usb/constants";
+import { NUM_CHANNELS } from "../device/channels";
 import type { CaptureConfigState } from "../stores/session";
 import type { MonitorLine } from "../monitor/terminal";
 
@@ -31,6 +31,7 @@ export function defaultConfig(
     sampleLimit: 1_000_000,
     enabledChannels: Array(NUM_CHANNELS).fill(true),
     trigger: { conditions: [] },
+    captures: 1,
     ...overrides,
   };
 }

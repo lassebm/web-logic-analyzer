@@ -19,7 +19,7 @@
     xToSample,
     type RenderRow,
   } from "../view/renderer";
-  import { CHANNEL_NAMES } from "../usb/constants";
+  import { CHANNEL_NAMES } from "../device/channels";
 
   const ROW_HEIGHT = 40;
   const RULER_HEIGHT = 22;

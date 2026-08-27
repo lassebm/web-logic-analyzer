@@ -12,6 +12,7 @@
     disabled?: boolean;
     width?: string;
     ariaLabel?: string;
+    title?: string;
   }
   let {
     value,
@@ -21,6 +22,7 @@
     disabled = false,
     width,
     ariaLabel,
+    title,
   }: Props = $props();
 
   const CUSTOM = "__custom__"; // sentinel option value, unlikely to collide
@@ -28,12 +30,15 @@
   let inputEl: HTMLInputElement | undefined = $state();
 
   // Always show every preset; include the current value too when it's a custom
-  // one, so it stays selected and visible in the list.
-  let items = $derived(
-    options.some((o) => String(o) === String(value))
-      ? options
-      : [...options, value],
-  );
+  // one, so it stays selected and visible in the list. A custom *numeric* value
+  // is placed in numeric order rather than tacked on the end — appended, a
+  // 100000 baud lands directly under 1000000 and the list reads as though the
+  // wrong entry were selected.
+  let items = $derived.by(() => {
+    if (options.some((o) => String(o) === String(value))) return options;
+    const merged = [...options, value];
+    return numeric ? merged.sort((a, b) => Number(a) - Number(b)) : merged;
+  });
 
   function coerce(raw: string): string | number {
     return numeric ? Number(raw) : raw;
@@ -73,6 +78,7 @@
     inputmode={numeric ? "numeric" : "text"}
     value={String(value)}
     {disabled}
+    {title}
     aria-label={ariaLabel}
     style={width ? `width:${width}` : undefined}
     onkeydown={(e) => {
@@ -85,6 +91,7 @@
   <select
     value={String(value)}
     {disabled}
+    {title}
     aria-label={ariaLabel}
     style={width ? `width:${width}` : undefined}
     onchange={onSelect}

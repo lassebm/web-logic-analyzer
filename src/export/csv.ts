@@ -1,5 +1,5 @@
 import type { CaptureBuffer } from "../model/capture";
-import { CHANNEL_NAMES } from "../usb/constants";
+import { CHANNEL_NAMES } from "../device/channels";
 import type { ExportChunk } from "./stream";
 
 /** Rows per emitted chunk — bounds each chunk string to a few MB. */

@@ -4,3 +4,5 @@ node_modules
 third-party
 *.fw
 package-lock.json
+# PlatformIO build output (tools/sump-emulator)
+.pio

@@ -11,6 +11,9 @@
   import {
     activeTab,
     monitorActive,
+    capabilities,
+    capturePosition,
+    stepCapture,
     captureStatus,
     captureBuffer,
     captureTick,
@@ -32,6 +35,13 @@
   let hasCapture = $derived(
     $captureTick >= 0 && ($captureBuffer?.sampleCount ?? 0) > 0,
   );
+
+  // Switching to a backend that has no Serial Monitor hides its tab; sitting on
+  // that tab would then show an empty page, so fall back to the analyzer.
+  $effect(() => {
+    if (!$capabilities.continuous && $activeTab === "monitor")
+      activeTab.set("analyzer");
+  });
 </script>
 
 <div class="app">
@@ -46,13 +56,20 @@
       {#if $captureStatus === "running"}<span class="tab-dot" title="Capturing"
         ></span>{/if}
     </button>
-    <button
-      class:active={$activeTab === "monitor"}
-      onclick={() => activeTab.set("monitor")}
-    >
-      Serial Monitor
-      {#if $monitorActive}<span class="tab-dot" title="Running"></span>{/if}
-    </button>
+    <!-- The Serial Monitor needs an endless stream. A SUMP device fills its own
+         memory and dumps it, so it can never provide one — that is a property of
+         the protocol, not of one device, so the tab is hidden for the whole
+         backend rather than shown permanently dead (the same reason the Firmware
+         chip is FX2-only). stores/monitor.ts still refuses defensively. -->
+    {#if $capabilities.continuous}
+      <button
+        class:active={$activeTab === "monitor"}
+        onclick={() => activeTab.set("monitor")}
+      >
+        Serial Monitor
+        {#if $monitorActive}<span class="tab-dot" title="Running"></span>{/if}
+      </button>
+    {/if}
   </nav>
 
   {#if $activeTab === "analyzer"}
@@ -102,6 +119,44 @@
               aria-label="Next activity region">▶</button
             >
           </div>
+          {#if $capturePosition}
+            <div class="activity" role="group" aria-label="Captures">
+              <span class="activity-label">Capture</span>
+              <button
+                class="step"
+                disabled={$captureStatus === "running" ||
+                  $capturePosition.index <= 1}
+                onclick={() => stepCapture(-1)}
+                title="Previous capture from this run"
+                aria-label="Previous capture">◀</button
+              >
+              <span class="counted">
+                <span
+                  class="activity-count"
+                  title={`Capture ${$capturePosition.index} of ${$capturePosition.total}${
+                    $capturePosition.triggered > 0
+                      ? ` — ${$capturePosition.triggered} met the trigger${$capturePosition.currentTriggered ? ", including this one" : ""}`
+                      : ""
+                  } — each is a separate recording; the time between them is not captured`}
+                >
+                  {$capturePosition.index}/{$capturePosition.total}
+                </span>
+                <span
+                  class="trig"
+                  class:on={$capturePosition.currentTriggered}
+                  title="This capture met the trigger condition"
+                ></span>
+              </span>
+              <button
+                class="step"
+                disabled={$captureStatus === "running" ||
+                  $capturePosition.index >= $capturePosition.total}
+                onclick={() => stepCapture(1)}
+                title="Next capture from this run"
+                aria-label="Next capture">▶</button
+              >
+            </div>
+          {/if}
           <button
             class:active={$detections !== null}
             disabled={!hasCapture}
@@ -214,6 +269,31 @@
   .step {
     padding: 5px 9px;
     line-height: 1;
+  }
+  /* The marker annotates the readout rather than standing beside it, so the two
+     are grouped and sit closer together than .activity's 6px gap. */
+  .counted {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+  /* Outside .activity-count so it can't shove the centred digits sideways, and
+     it keeps its space when there is nothing to mark, so paging across a
+     triggered capture doesn't shift the readout (cf. .counter-field in
+     CaptureControls, reserved for the same reason).
+     Drawn rather than typed: a bullet or asterisk glyph is small and sits at a
+     different height in every font, so its size and vertical centring can't be
+     relied on. Same dot as .tab-dot above, which marks a running capture. */
+  .trig {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--accent);
+    visibility: hidden;
+  }
+  .trig.on {
+    visibility: visible;
   }
   .activity-count {
     min-width: 34px;

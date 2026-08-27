@@ -6,6 +6,7 @@ import {
 } from "./constants";
 import { Fx2Device } from "./fx2Device";
 import { encodeSampleRate } from "./sampleRate";
+import type { CaptureCallbacks } from "../device/types";
 
 export interface FirmwareVersion {
   major: number;
@@ -133,12 +134,6 @@ async function readOrTimeout(
   } finally {
     clearTimeout(timer);
   }
-}
-
-export interface CaptureCallbacks {
-  onData: (chunk: Uint8Array) => void;
-  onProgress?: (samplesCollected: number) => void;
-  onError?: (err: unknown) => void;
 }
 
 /**

@@ -6,15 +6,15 @@
 // session.ts; this module imports them (one-way) so it stays free of a cycle.
 import { get, writable } from "svelte/store";
 import { CaptureBuffer } from "../model/capture";
-import { CaptureSession } from "../usb/capture";
 import { SerialTerminal, type MonitorLine } from "../monitor/terminal";
 import { getDecoder } from "../decode/registry";
 import { runDecoder } from "../decode/engine";
 import type { BytePacket } from "../decode/types";
-import { SAMPLE_RATES } from "../usb/sampleRate";
+import type { Acquisition } from "../device/types";
 import {
   connectedDevice,
   friendlyError,
+  capabilities,
   captureStatus,
   statusMessage,
   monitorActive,
@@ -64,20 +64,22 @@ export const monitorConfig = writable<MonitorConfig>({
 });
 
 let monitorBuf: CaptureBuffer | null = null;
-let monitorSession: CaptureSession | null = null;
+let monitorSession: Acquisition | null = null;
 let monitorTimer: ReturnType<typeof setInterval> | null = null;
 let terminal: SerialTerminal | null = null;
 let lastProcessedAbs = -1;
 
-/** Pick a supported sample rate that oversamples the baud rate ~8x. */
-export function pickMonitorRate(baud: number): number {
+/**
+ * Pick a supported sample rate that oversamples the baud rate ~8x. The rate list
+ * comes from the connected device's capabilities, so a backend with a different
+ * divider continuum still gets a rate it can actually produce.
+ */
+export function pickMonitorRate(baud: number, rates?: number[]): number {
+  const list = rates ?? get(capabilities).sampleRates;
   // The baud field is an editable dropdown, so it can be momentarily empty/invalid;
   // fall back to the default so the rate readout and capture stay sensible.
   const target = (baud > 0 ? baud : 115200) * 8;
-  return (
-    SAMPLE_RATES.find((r) => r >= target) ??
-    SAMPLE_RATES[SAMPLE_RATES.length - 1]
-  );
+  return list.find((r) => r >= target) ?? list[list.length - 1];
 }
 
 /**
@@ -146,8 +148,15 @@ function processMonitor(): void {
 export async function startMonitor(): Promise<void> {
   const device = connectedDevice();
   if (!device || get(monitorActive) || get(captureStatus) === "running") return;
+  // The monitor is an endless capture, which a device that fills its own memory
+  // once and dumps it cannot provide. App.svelte hides the tab for those, so
+  // this is the backstop for a caller that reaches here anyway — refuse rather
+  // than hang waiting on a one-shot dump that will never keep streaming.
+  if (!device.capabilities.continuous) return;
   const cfg = get(monitorConfig);
-  const rate = pickMonitorRate(cfg.baud);
+  const rate = device.resolveSampleRate(
+    pickMonitorRate(cfg.baud, device.capabilities.sampleRates),
+  );
 
   monitorBuf = new CaptureBuffer(rate, 1 << 20);
   terminal = new SerialTerminal(
@@ -164,11 +173,11 @@ export async function startMonitor(): Promise<void> {
   monitorTimer = setInterval(processMonitor, 80);
 
   let failure: string | null = null;
-  monitorSession = new CaptureSession(
-    device,
+  monitorSession = device.acquire(
     {
       sampleRate: rate,
       sampleLimit: Number.MAX_SAFE_INTEGER,
+      trigger: { conditions: [] },
       transferSize: 8 * 1024,
     },
     {

@@ -11,9 +11,8 @@
 // rather than protection.
 import { derived, get, type Readable } from "svelte/store";
 import {
-  captureBuffer,
+  capturedSamples,
   captureStatus,
-  captureTick,
   isTabOnlyCapture,
   monitorActive,
   sampleSource,
@@ -41,22 +40,16 @@ export function unsavedWorkReason(s: UnsavedWorkState): string | null {
   return null;
 }
 
-/** `captureTick` is in the dependency list because the buffer fills by mutation:
- *  without it the sample count would go stale mid-capture. */
+/** `capturedSamples` counts every capture a Run took, and already tracks the
+ *  mutation of a filling buffer — so a stopped run whose newest capture is empty
+ *  is still guarded on the strength of the earlier ones. */
 export const unsavedWork: Readable<string | null> = derived(
-  [
-    captureStatus,
-    captureTick,
-    captureBuffer,
-    sampleSource,
-    monitorActive,
-    monitorLines,
-  ],
-  ([$status, , $buffer, $source, $monitorActive, $lines]) =>
+  [captureStatus, capturedSamples, sampleSource, monitorActive, monitorLines],
+  ([$status, $samples, $source, $monitorActive, $lines]) =>
     unsavedWorkReason({
       captureStatus: $status,
       sampleSource: $source,
-      sampleCount: $buffer?.sampleCount ?? 0,
+      sampleCount: $samples,
       monitorActive: $monitorActive,
       monitorLineCount: $lines.length,
     }),

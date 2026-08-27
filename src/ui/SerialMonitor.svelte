@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { connStatus, captureStatus } from "../stores/session";
+  import { connStatus, captureStatus, capabilities } from "../stores/session";
   import {
     monitorActive,
     monitorLines,
@@ -18,7 +18,7 @@
     MAX_LINE_CHARS,
     type MonitorLine,
   } from "../monitor/terminal";
-  import { CHANNEL_NAMES, NUM_CHANNELS } from "../usb/constants";
+  import { CHANNEL_NAMES } from "../device/channels";
   import { formatSampleRate } from "../usb/sampleRate";
   import { downloadText } from "../export/download";
   import EditableSelect from "./EditableSelect.svelte";
@@ -73,10 +73,21 @@
   // identity and only the rows that actually changed re-render.
   let rows = $derived($monitorLines);
 
-  let effectiveRate = $derived(pickMonitorRate($monitorConfig.baud));
-  let canStart = $derived(
-    $connStatus === "ready" && !$monitorActive && $captureStatus !== "running",
+  let effectiveRate = $derived(
+    pickMonitorRate($monitorConfig.baud, $capabilities.sampleRates),
   );
+  // Why the monitor can't run, or "" when it can — one string behind both the
+  // disabled Start button and the hint the empty terminal shows. There is no
+  // case here for a device that can't stream continuously: App.svelte hides this
+  // whole tab for those, so the panel never renders for one.
+  let lockedReason = $derived(
+    $connStatus !== "ready"
+      ? "Connect a device first."
+      : $captureStatus === "running"
+        ? "Stop the logic capture first."
+        : "",
+  );
+  let canStart = $derived(!lockedReason && !$monitorActive);
 
   function buildExport(): string {
     const cfg = $monitorConfig;
@@ -119,13 +130,6 @@
   function downloadLog() {
     downloadText("serial-log.tsv", buildExport(), "text/tab-separated-values");
   }
-  let lockedReason = $derived(
-    $connStatus !== "ready"
-      ? "Connect a device first."
-      : $captureStatus === "running"
-        ? "Stop the logic capture first."
-        : "",
-  );
 </script>
 
 <!-- Marks a row the char cap split off the one above, so a device that never
@@ -141,7 +145,7 @@
     <label
       >Ch
       <select bind:value={$monitorConfig.channel} disabled={$monitorActive}>
-        {#each Array(NUM_CHANNELS) as _, ch (ch)}<option value={ch}
+        {#each Array($capabilities.channels) as _, ch (ch)}<option value={ch}
             >{CHANNEL_NAMES[ch]}</option
           >{/each}
       </select>
@@ -154,6 +158,7 @@
         numeric
         disabled={$monitorActive}
         ariaLabel="Baud"
+        title="Pick a preset, or “Custom…” to type any value"
         onchange={(v) =>
           monitorConfig.update((c) => ({ ...c, baud: v as number }))}
       />

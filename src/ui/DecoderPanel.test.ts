@@ -166,6 +166,38 @@ describe("DecoderPanel", () => {
     expect(get(decoders)[0].options.baudrate).toBe(250000);
   });
 
+  // A custom value used to be appended after the presets, so it landed under
+  // the largest one and the list read as though that entry were selected.
+  // 83333 is a real automotive body-bus rate, and deliberately not a preset.
+  it("lists a custom numeric value in order, not tacked on the end", async () => {
+    render(DecoderPanel);
+    await fireEvent.click(screen.getByRole("button", { name: /Add decoder/ }));
+    await fireEvent.click(screen.getByRole("button", { name: /CAN/ }));
+
+    const rate = screen.getByLabelText("Bit rate") as HTMLSelectElement;
+    const customValue = [...rate.options].find(
+      (o) => o.text === "Custom…",
+    )!.value;
+    await fireEvent.change(rate, { target: { value: customValue } });
+    await tick();
+    const input = screen.getByLabelText("Bit rate") as HTMLInputElement;
+    await fireEvent.change(input, { target: { value: "83333" } });
+    await fireEvent.blur(input);
+    expect(get(decoders)[0].options.bitrate).toBe(83333);
+
+    await tick();
+    const after = screen.getByLabelText("Bit rate") as HTMLSelectElement;
+    const listed = [...after.options]
+      .map((o) => Number(o.value))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    expect(listed).toContain(83333);
+    expect(listed).toEqual([...listed].sort((a, b) => a - b));
+    // The typed value stays selected, and sits between the presets it belongs
+    // between rather than after the largest one.
+    expect(Number(after.value)).toBe(83333);
+    expect(listed[listed.length - 1]).not.toBe(83333);
+  });
+
   it("auto-numbers instances of the same type and lets them be renamed", async () => {
     render(DecoderPanel);
     await fireEvent.click(screen.getByRole("button", { name: /Add decoder/ }));

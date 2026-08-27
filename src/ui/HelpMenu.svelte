@@ -39,10 +39,9 @@
     <div class="popover">
       <div class="title"><strong>Web</strong> Logic Analyzer</div>
       <p class="note">
-        A browser-based logic analyzer for FX2LP (<span class="mono"
-          >fx2lafw</span
-        >) devices over WebUSB — capture 8 channels, view, and decode UART / SPI
-        / I²C / 1-Wire / CAN.
+        A browser-based logic analyzer for FX2 (<span class="mono">fx2lafw</span
+        >) devices over WebUSB and SUMP/OLS devices over Web Serial — capture 8
+        channels, view, and decode UART / SPI / I²C / 1-Wire / CAN.
       </p>
 
       <button class="demo" onclick={runDemo}>Load demo capture</button>

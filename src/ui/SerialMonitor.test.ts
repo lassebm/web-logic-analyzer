@@ -4,7 +4,8 @@ import { tick } from "svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { get } from "svelte/store";
 import SerialMonitor from "./SerialMonitor.svelte";
-import { connStatus, captureStatus } from "../stores/session";
+import { connStatus, captureStatus, capabilities } from "../stores/session";
+import { FX2_CAPABILITIES } from "../device/fx2";
 import { monitorConfig, monitorActive, monitorLines } from "../stores/monitor";
 import { monitorLine } from "../test/fixtures";
 
@@ -13,6 +14,7 @@ beforeEach(() => {
   captureStatus.set("idle");
   monitorActive.set(false);
   monitorLines.set([]);
+  capabilities.set(FX2_CAPABILITIES);
   monitorConfig.set({
     channel: 0,
     baud: 115200,
@@ -196,5 +198,18 @@ describe("SerialMonitor", () => {
     monitorLines.set([...lines, monitorLine("new")]);
     await tick();
     expect(reads).toBe(0); // none of the 50 existing rows re-read their fields
+  });
+
+  it("lists only the channels the device has", async () => {
+    capabilities.set({ ...FX2_CAPABILITIES, channels: 4 });
+    render(SerialMonitor);
+    await tick();
+    const channel = screen.getByLabelText("Ch") as HTMLSelectElement;
+    expect([...channel.options].map((o) => o.textContent)).toEqual([
+      "D0",
+      "D1",
+      "D2",
+      "D3",
+    ]);
   });
 });

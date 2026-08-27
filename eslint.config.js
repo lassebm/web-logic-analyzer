@@ -47,6 +47,6 @@ export default ts.config(
   },
 
   {
-    ignores: ["dist/", "coverage/", "node_modules/", "**/*.fw"],
+    ignores: ["dist/", "coverage/", "node_modules/", "**/.pio/", "**/*.fw"],
   },
 );

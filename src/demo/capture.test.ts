@@ -20,6 +20,23 @@ function values(packets: { data: unknown }[]): number[] {
   return packets.map((p) => (p.data as { value: number }).value);
 }
 
+describe("demo decoder wiring", () => {
+  // Every value the demo pre-selects should be a normal entry in its decoder's
+  // own preset list. A demo shipping a rate the dropdown doesn't offer reads as
+  // a custom value, which is how the CAN rate came to look like the wrong one.
+  it("pre-selects only values the decoder offers as presets", () => {
+    for (const inst of DEMO_DECODERS) {
+      const dec = getDecoder(inst.decoderId);
+      expect(dec, inst.decoderId).toBeDefined();
+      for (const opt of dec!.meta.options) {
+        const chosen = inst.options[opt.id];
+        if (chosen === undefined || !opt.presets) continue;
+        expect(opt.presets, `${inst.decoderId}.${opt.id}`).toContain(chosen);
+      }
+    }
+  });
+});
+
 describe("demo capture", () => {
   it("carries a UART telegram on D0", () => {
     // "Hello\n"

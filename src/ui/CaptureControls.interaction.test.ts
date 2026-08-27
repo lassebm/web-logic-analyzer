@@ -16,7 +16,7 @@ import {
   decoders,
   type SampleSource,
 } from "../stores/session";
-import { CHANNEL_NAMES } from "../usb/constants";
+import { CHANNEL_NAMES } from "../device/channels";
 import { defaultConfig } from "../test/fixtures";
 import { packLevels } from "../test/waveforms";
 
@@ -121,14 +121,12 @@ describe("CaptureControls interactions", () => {
     expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
 
     // Arm two channels, then Clear wipes them all at once.
-    await fireEvent.change(
-      screen.getByTitle("Software trigger condition for D0"),
-      { target: { value: "rising" } },
-    );
-    await fireEvent.change(
-      screen.getByTitle("Software trigger condition for D2"),
-      { target: { value: "falling" } },
-    );
+    await fireEvent.change(screen.getByTitle("Trigger condition for D0"), {
+      target: { value: "rising" },
+    });
+    await fireEvent.change(screen.getByTitle("Trigger condition for D2"), {
+      target: { value: "falling" },
+    });
     expect(get(config).trigger.conditions).toHaveLength(2);
 
     await fireEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -139,7 +137,7 @@ describe("CaptureControls interactions", () => {
   it("sets and clears a per-channel software trigger via the edge select", async () => {
     render(CaptureControls);
     const select = screen.getByTitle(
-      "Software trigger condition for D0",
+      "Trigger condition for D0",
     ) as HTMLSelectElement;
 
     // Starts with no conditions.
@@ -165,7 +163,7 @@ describe("CaptureControls interactions", () => {
   it("replaces (does not duplicate) a channel trigger when the edge changes", async () => {
     render(CaptureControls);
     const select = screen.getByTitle(
-      "Software trigger condition for D0",
+      "Trigger condition for D0",
     ) as HTMLSelectElement;
 
     await fireEvent.change(select, { target: { value: "rising" } });

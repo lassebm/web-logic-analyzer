@@ -10,10 +10,13 @@
     finishConnect,
     disconnect,
     tryReconnect,
-    watchUsbDisconnect,
+    watchDeviceDisconnect,
     refreshFirmware,
+    backendId,
+    setBackend,
   } from "../stores/session";
-  import { Fx2Device } from "../usb/fx2Device";
+  import { BACKENDS, getBackend } from "../device/registry";
+  import type { BackendId } from "../device/types";
   import { saveFirmware, clearFirmware } from "../usb/firmwareStore";
   import { FIRMWARE_VERSION, FIRMWARE_SOURCE_URL } from "../firmware";
   import HelpMenu from "./HelpMenu.svelte";
@@ -21,7 +24,9 @@
   let fileInput: HTMLInputElement | undefined = $state();
   let fwMenuOpen = $state(false);
   let fwEl: HTMLElement | undefined = $state();
-  const supported = Fx2Device.isSupported();
+  // Which transport the selected backend needs, and whether this browser has it.
+  let backend = $derived(getBackend($backendId));
+  let supported = $derived(backend.isSupported());
 
   // Close the firmware popover on an outside click or Escape (same pattern as
   // the decoder add-list).
@@ -32,10 +37,10 @@
 
   onMount(async () => {
     await refreshFirmware();
-    if (supported) {
-      watchUsbDisconnect();
-      await tryReconnect();
-    }
+    // watchDeviceDisconnect() registers with every supported backend and guards
+    // itself, so it doesn't depend on which one is selected right now.
+    watchDeviceDisconnect();
+    if (supported) await tryReconnect();
   });
 
   async function onFirmwareFile(e: Event) {
@@ -83,15 +88,32 @@
     <strong>Web</strong> Logic Analyzer
   </div>
 
+  <div class="group">
+    <label class="blabel" for="backend">Device</label>
+    <select
+      id="backend"
+      value={$backendId}
+      disabled={$connStatus === "ready"}
+      title={$connStatus === "ready"
+        ? "Disconnect before switching device family"
+        : "Which hardware family Connect talks to"}
+      onchange={(e) => setBackend(e.currentTarget.value as BackendId)}
+    >
+      {#each BACKENDS as b (b.id)}
+        <option value={b.id}>{b.name}</option>
+      {/each}
+    </select>
+  </div>
+
   {#if !supported}
     <span class="msg unsupported" style="color:var(--danger)">
-      WebUSB unavailable — use Chrome, Edge, or another Chromium browser.
+      {backend.unsupportedMessage}
     </span>
   {:else}
     <div class="group">
       {#if $connStatus === "ready"}
         <button class="danger" onclick={disconnect}>Disconnect</button>
-        <span class="dev mono">{$deviceLabel}</span>
+        <span class="dev mono" title={$deviceLabel}>{$deviceLabel}</span>
       {:else if $connStatus === "reselect"}
         <!-- Firmware uploaded; the re-enumerated device needs one manual pick to
              grant its new fx2lafw identity (WebUSB can't do it automatically). -->
@@ -109,55 +131,60 @@
       {/if}
     </div>
 
-    <div class="group fw-group" bind:this={fwEl}>
-      <!-- Firmware is bundled by default (auto-selected by device); custom is optional. -->
-      <button
-        class="fw-chip"
-        title="Firmware options"
-        aria-haspopup="true"
-        aria-expanded={fwMenuOpen}
-        onclick={() => (fwMenuOpen = !fwMenuOpen)}
-      >
-        Firmware: {$firmwareInfo ? "custom" : "bundled"}
-      </button>
-      {#if fwMenuOpen}
-        <div class="popover">
-          {#if $firmwareInfo}
-            <div class="fw-name" title={$firmwareInfo.name}>
-              Custom: {$firmwareInfo.name} · {(
-                $firmwareInfo.size / 1024
-              ).toFixed(0)} KB
-            </div>
-            <button onclick={() => fileInput?.click()}
-              >Replace custom .fw…</button
+    {#if $backendId === "fx2"}
+      <!-- Firmware is an FX2 concept: a SUMP device runs its own. -->
+      <div class="group fw-group" bind:this={fwEl}>
+        <!-- Firmware is bundled by default (auto-selected by device); custom is optional. -->
+        <button
+          class="fw-chip"
+          title="Firmware options"
+          aria-haspopup="true"
+          aria-expanded={fwMenuOpen}
+          onclick={() => (fwMenuOpen = !fwMenuOpen)}
+        >
+          Firmware: {$firmwareInfo ? "custom" : "bundled"}
+        </button>
+        {#if fwMenuOpen}
+          <div class="popover">
+            {#if $firmwareInfo}
+              <div class="fw-name" title={$firmwareInfo.name}>
+                Custom: {$firmwareInfo.name} · {(
+                  $firmwareInfo.size / 1024
+                ).toFixed(0)} KB
+              </div>
+              <button onclick={() => fileInput?.click()}
+                >Replace custom .fw…</button
+              >
+              <button onclick={onClearFirmware}
+                >Use bundled (remove custom)</button
+              >
+            {:else}
+              <div class="fw-note">
+                Bundled: sigrok fx2lafw {FIRMWARE_VERSION} — auto-selected by device.
+              </div>
+              <button onclick={() => fileInput?.click()}
+                >Load custom .fw…</button
+              >
+            {/if}
+            <a
+              class="fw-link"
+              href={FIRMWARE_SOURCE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
             >
-            <button onclick={onClearFirmware}
-              >Use bundled (remove custom)</button
-            >
-          {:else}
-            <div class="fw-note">
-              Bundled: sigrok fx2lafw {FIRMWARE_VERSION} — auto-selected by device.
-            </div>
-            <button onclick={() => fileInput?.click()}>Load custom .fw…</button>
-          {/if}
-          <a
-            class="fw-link"
-            href={FIRMWARE_SOURCE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Firmware source &amp; license (GPLv2+) ↗
-          </a>
-        </div>
-      {/if}
-      <input
-        bind:this={fileInput}
-        type="file"
-        accept=".fw,application/octet-stream"
-        onchange={onFirmwareFile}
-        hidden
-      />
-    </div>
+              Firmware source &amp; license (GPLv2+) ↗
+            </a>
+          </div>
+        {/if}
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept=".fw,application/octet-stream"
+          onchange={onFirmwareFile}
+          hidden
+        />
+      </div>
+    {/if}
 
     <div class="status" style="--dot:{statusColor}">
       <span class="dot"></span>
@@ -188,6 +215,10 @@
   .brand strong {
     color: var(--accent);
   }
+  .blabel {
+    font-size: var(--fs-ui);
+    color: var(--fg-dim);
+  }
   .group {
     display: flex;
     align-items: center;
@@ -196,10 +227,13 @@
   .fw-group {
     position: relative;
   }
+  /* A SUMP device names itself and its geometry ("… — 8 channels, 262,144
+     samples"), far longer than an FX2's "fx2lafw — fw 1.3, rev 1". Room for the
+     long form, and a title so anything still clipped is one hover away. */
   .dev {
     font-size: var(--fs-ui);
     color: var(--fg-dim);
-    max-width: 260px;
+    max-width: 420px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

@@ -1,19 +1,21 @@
 # Web Logic Analyzer
 
 **A logic analyzer that runs entirely in your browser — no drivers, no install.**
-Plug in a cheap FX2LP-based analyzer, open a tab, and capture, visualize, and decode
-digital signals over **WebUSB**.
+Plug in a cheap FX2-based analyzer or a SUMP/OLS device, open a tab, and capture,
+visualize, and decode digital signals over **WebUSB** or **Web Serial**.
 
 ### ▶ [Open the app →](https://lassebm.github.io/web-logic-analyzer/)
 
-Runs in Chrome, Edge, or Brave — WebUSB is Chromium-only (see [Browser support](#browser-support)).
-Nothing to install; the app uploads the device firmware for you. New here? Jump to
+Runs in Chrome, Edge, or Brave — WebUSB and Web Serial are Chromium-only (see
+[Browser support](#browser-support)). Nothing to install; for FX2 boards the app
+uploads the device firmware for you. New here? Jump to
 [Getting started](#getting-started).
 
-It drives the same FX2LP boards that [sigrok/PulseView](https://sigrok.org) support
-through their `fx2lafw` driver — but where PulseView is a native app you install per machine, this
-is a single web page: nothing to compile, nothing to set up, and the app even uploads
-the device firmware for you. Open it on any machine with Chrome and go.
+It drives the same hardware [sigrok/PulseView](https://sigrok.org) supports through
+their `fx2lafw` and `openbench-logic-sniffer` drivers — but where PulseView is a native
+app you install per machine, this is a single web page: nothing to compile, nothing to
+set up, and for FX2 boards the app even uploads the device firmware for you. Open it
+on any machine with Chrome and go.
 
 ![Web Logic Analyzer with the demo capture loaded — one short exchange per protocol laid out across the 8 channels, with UART, SPI, I²C, 1-Wire and a stacked ASCII decoder all running.](docs/demo-loaded.png)
 
@@ -28,10 +30,19 @@ _The built-in demo capture — a short exchange on every supported protocol, ful
    > explore the whole app — waveform, decoders, and auto-detect — with a sample capture
    > covering every protocol.
 
-2. Plug in an FX2LP board — a cheap "nanoDLA" / Saleae clone (e.g. VID:PID `0925:3881`).
-3. Click **Connect device** and pick your board in Chrome's device chooser. The matching
-   firmware uploads automatically and the device re-enumerates — no driver install. (Only
-   load a custom `.fw` via **Firmware** if your board isn't auto-detected.)
+2. Pick your hardware family in the **Device** dropdown, then plug it in:
+   - **FX2 (USB)** — a cheap "nanoDLA" / Saleae clone (e.g. VID:PID `0925:3881`).
+     Either Cypress chip variant works — FX2 (CY7C68013) or FX2LP (CY7C68013A) —
+     since `fx2lafw` supports both.
+   - **SUMP/OLS (serial)** — an Open Bench Logic Sniffer, a Bus Pirate or an
+     [ESP32 Bit Pirate](https://geo-tp.github.io/ESP32-Bit-Pirate/) in
+     logic-analyzer mode, or anything else that speaks the SUMP protocol over a
+     serial port. Put the device in SUMP mode before connecting.
+3. Click **Connect device** and pick your board in Chrome's chooser. For an FX2 board
+   the matching firmware uploads automatically and the device re-enumerates — no driver
+   install. (Only load a custom `.fw` via **Firmware** if your board isn't auto-detected.)
+   For a SUMP device the app asks the device what it is and sets the available sample
+   rates and sample counts from its own answer.
 4. Set the sample rate, active channels, and sample count, then click **Run** to capture.
 5. **Decode:** click **Detect** to auto-add a UART or I²C decoder, or add one manually from
    the decoder panel and map it to a channel. Click the waveform to drop measurement cursors
@@ -44,18 +55,25 @@ _The built-in demo capture — a short exchange on every supported protocol, ful
 
 ## Features
 
-At a glance: **capture** up to 24 MHz over WebUSB, **view** 8 channels on a zoomable
-canvas, **auto-detect** UART & I²C signals, **decode** UART / SPI / I²C / 1-Wire / CAN,
-and **import / export** CSV / VCD — all in the browser, with the device firmware uploaded
-for you.
+At a glance: **capture** up to 24 MHz over WebUSB (or from a SUMP/OLS device over
+serial), **view** 8 channels on a zoomable canvas, **auto-detect** UART & I²C signals,
+**decode** UART / SPI / I²C / 1-Wire / CAN, and **import / export** CSV / VCD — all in
+the browser, with the FX2 firmware uploaded for you.
 
-- **WebUSB connection** — automatic firmware upload and re-enumeration, and it notices
-  when the device is unplugged and resets cleanly.
-- **Configurable capture** — sample rate (20 kHz–24 MHz), active channels, sample count
-  (10k up to 100M for long captures). Hiding a channel takes it out of the view, the
-  exports, and any decoder reading it.
-- **Software trigger** — per-channel rising/falling/level, matching sigrok's model (the
-  FX2 has no hardware trigger, so it's done client-side).
+- **Two device families, one app** — pick **FX2 (USB)** or **SUMP/OLS (serial)** from
+  the **Device** dropdown; the choice is remembered. Everything above the connection —
+  the waveform, the decoders, auto-detect, import/export — works the same either way,
+  and the toolbar offers only the sample rates and sample counts your device can
+  actually do.
+- **Automatic connection handling** — FX2 firmware upload and re-enumeration happen for
+  you, and either family notices when the device is unplugged and resets cleanly.
+- **Configurable capture** — sample rate, active channels, and sample count, all offered
+  from what the connected device supports (20 kHz–24 MHz and up to 100M samples on
+  FX2; a SUMP device's reported rate ceiling and buffer depth otherwise). Hiding a channel takes it
+  out of the view, the exports, and any decoder reading it.
+- **Trigger** — per-channel rising/falling/level. SUMP devices with a trigger unit wait
+  for a High/Low condition in hardware; everything else, including edges, is found in the
+  samples afterwards, matching sigrok's model.
 - **Waveform viewer** — 8 channels, trigger-relative time ruler, zoom (Ctrl/⌘+wheel) and
   pan (drag, horizontal swipe, or Shift+wheel), zoom-to-fit, and an activity pager: `▶`
   jumps to the first region of signal and steps through the rest, showing your position
@@ -65,6 +83,13 @@ for you.
   zoom (a UART burst is framed whole, a continuous signal rolls) instead of watching the
   whole capture shrink. Toggle it off for a fixed view. Either way it fits the whole
   capture when the run stops.
+- **Repeat captures** — take several captures in one Run (or keep going **Until
+  stopped**), then step through them with the **Capture** pager. With a trigger set
+  the run stops as soon as one fires, which is how you catch something you can't
+  time by hand — especially on hardware with no hardware trigger, where the trigger
+  is otherwise only applied after the fact. Each capture is a separate recording:
+  the time between them isn't recorded, so they're separate events rather than one
+  long capture.
 - **Measurement cursors** — click to drop cursors; read Δt, frequency, and sample delta.
 - **Editable baud** — the UART decoder and Serial Monitor pick baud from common presets
   or take any custom value (a preset dropdown with a "Custom…" entry).
@@ -87,8 +112,8 @@ for you.
   saved by this app reloads exactly as captured; a VCD from another tool reloads as
   faithfully as the format allows — its first eight signals become D0–D7, in the
   order the file declares them.
-- **Serial Monitor** — a continuous-capture UART terminal in its own tab (the FX2 captures
-  one thing at a time, so it's a mode, not an overlay), with full UART settings and
+- **Serial Monitor** — a continuous-capture UART terminal in its own tab (the device
+  captures one thing at a time, so it's a mode, not an overlay), with full UART settings and
   toggleable columns (timestamps, raw hex, text). A new line starts on a line-feed and,
   optionally, after an idle gap; memory stays bounded automatically. A device that sends
   no line-feed at all has its output split into readable rows, and each split is marked
@@ -100,7 +125,7 @@ for you.
 
 ## Screenshots
 
-![Live UART capture on real FX2LP hardware: auto-detect matched the line at 115200 8-N-1, a UART + stacked ASCII decoder resolve the bytes to text, and two measurement cursors read the bit time.](docs/capture-real-hw.png)
+![Live UART capture on real FX2 hardware: auto-detect matched the line at 115200 8-N-1, a UART + stacked ASCII decoder resolve the bytes to text, and two measurement cursors read the bit time.](docs/capture-real-hw.png)
 
 _Capturing UART on real hardware — auto-detected at 115200 8-N-1, decoded to ASCII, with measurement cursors._
 
@@ -114,15 +139,40 @@ _The Serial Monitor on real hardware, all columns enabled (wall time, from start
 
 ## Browser support
 
-WebUSB is **Chromium-only** — use Chrome, Edge, Brave, or similar. Firefox and Safari
-do not implement WebUSB.
+WebUSB and Web Serial are both **Chromium-only** — use Chrome, Edge, Brave, or similar.
+Firefox and Safari implement neither.
 
-On **Windows**, the device must be bound to the WinUSB driver for WebUSB to open it.
+SUMP devices connect over Web Serial, which needs no special driver beyond the usual
+USB-serial one your OS already uses for the board.
+
+On **Windows**, an FX2 device must be bound to the WinUSB driver for WebUSB to open it.
 If the device isn't detected, use [Zadig](https://zadig.akeo.ie/) to install WinUSB on
 the interface (this is the same requirement PulseView has on Windows). On Linux you may
 need a udev rule granting access; on macOS it works out of the box.
 
+## SUMP/OLS devices
+
+Anything that speaks the SUMP (OLS) protocol over a serial port works: the Open Bench
+Logic Sniffer, a Bus Pirate in logic-analyzer mode, the Logic Shrimp, a JTAGulator, the
+Arduino AGLA sketch, or an [ESP32 Bit Pirate](https://geo-tp.github.io/ESP32-Bit-Pirate/).
+Select **SUMP/OLS (serial)**, put the device in SUMP mode, and hit **Connect device** —
+the app asks the device what it is and configures itself from the answer, so the rate and
+sample-count lists reflect that particular board.
+
+Two differences from an FX2 board, both because of how the protocol works:
+
+- **A SUMP device captures one buffer at a time** and sends it only once the run is over.
+  So there is no live **Follow** view (the toolbar's toggle is disabled and says why), and
+  the **Serial Monitor** tab is hidden — it needs an endless stream, which the protocol
+  cannot provide. The status line shows the upload progressing instead. To see more than
+  one buffer, use **Captures** and page through the results.
+- **The app captures D0–D7.** Devices with more channels than that are used eight channels
+  wide; devices with fewer show only the channels they have.
+
 ## Firmware
+
+Firmware applies to FX2 boards only — a SUMP device runs its own, and the **Firmware**
+control is hidden when that family is selected.
 
 The app **bundles the `fx2lafw` firmware** (sigrok-firmware-fx2lafw 0.1.7) and
 auto-selects the right image by the device's USB VID:PID — so for supported boards it
@@ -158,13 +208,15 @@ npm run preview       # serve the production build locally
 Pushing to `main` runs the [GitHub Pages workflow](.github/workflows/deploy.yml), which
 type-checks, builds, and publishes `dist/` to
 <https://lassebm.github.io/web-logic-analyzer/>. The Vite `base` is relative (`./`), so the
-same bundle runs unchanged at that sub-path or from `npm run preview` locally. WebUSB needs
-a secure context — Pages serves over HTTPS, which satisfies it.
+same bundle runs unchanged at that sub-path or from `npm run preview` locally. WebUSB and
+Web Serial need a secure context — Pages serves over HTTPS, which satisfies it.
 
 ## Architecture
 
 ```
+src/device/   hardware-agnostic device contract + backend registry (FX2, SUMP)
 src/usb/      WebUSB wrapper, protocol constants, firmware upload, capture streaming
+src/sump/     SUMP/OLS protocol, metadata parsing, device profiles, Web Serial wrapper
 src/firmware/ bundled fx2lafw .fw images + loader
 src/model/    CaptureBuffer (packed samples), software trigger, activity clusters
 src/decode/   decoder plugin API + edge-jumping engine + decoders (uart, spi, i2c, onewire, can, ascii) + protocol auto-detection
@@ -177,9 +229,12 @@ src/import/   CSV + VCD parsers + streaming file importer
 src/demo/     built-in no-hardware demo capture (all protocols)
 ```
 
-Protocol details (firmware-load request `0xA0`, CPUCS `0xE600`, `CMD_START` config,
-sample-rate encoding, bulk endpoint discovery) are documented inline in
-`src/usb/constants.ts`, `firmware.ts`, and `sampleRate.ts`, sourced from libsigrok.
+Protocol details are documented inline, sourced from libsigrok: the FX2 side
+(firmware-load request `0xA0`, CPUCS `0xE600`, `CMD_START` config, sample-rate encoding,
+bulk endpoint discovery) in `src/usb/constants.ts`, `firmware.ts` and `sampleRate.ts`;
+the SUMP side (command encoding, the big-endian metadata TLV, per-device fallbacks) in
+`src/sump/protocol.ts`, `metadata.ts` and `profiles.ts`, which deliberately track
+libsigrok's `openbench-logic-sniffer` driver so any device PulseView drives works here.
 
 Large captures stay responsive through two structures: an incremental **min/max pyramid**
 in `CaptureBuffer` makes zoomed-out rendering O(log n), and the decode engine jumps between
@@ -206,7 +261,7 @@ AI was used extensively across this project — to work through the FX2 / `fx2la
 USB protocol, and to write the WebUSB layer, the protocol decoders, the Svelte UI,
 the tests, and this documentation. None of it is guesswork: the device handling
 follows libsigrok / `fx2lafw`, and the whole capture-to-decode path has been
-validated end to end on real FX2LP hardware.
+validated end to end on real FX2 hardware.
 
 ## License
 

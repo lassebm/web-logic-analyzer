@@ -1,6 +1,6 @@
 <script lang="ts">
   import { detections, addDecoder } from "../stores/session";
-  import { CHANNEL_NAMES } from "../usb/constants";
+  import { CHANNEL_NAMES } from "../device/channels";
   import {
     detectionToDecoder,
     type Detection,

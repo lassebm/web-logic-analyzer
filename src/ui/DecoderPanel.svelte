@@ -12,7 +12,7 @@
     type DecoderInstance,
   } from "../stores/session";
   import { DECODERS, getDecoder } from "../decode/registry";
-  import { CHANNEL_NAMES, NUM_CHANNELS } from "../usb/constants";
+  import { CHANNEL_NAMES, NUM_CHANNELS } from "../device/channels";
   import EditableSelect from "./EditableSelect.svelte";
 
   let open = $state(false);
@@ -306,6 +306,7 @@
                   numeric={typeof opt.default === "number"}
                   width="120px"
                   ariaLabel={opt.desc}
+                  title="Pick a preset, or “Custom…” to type any value"
                   onchange={(v) =>
                     updateDecoder(inst.uid, {
                       options: { ...inst.options, [opt.id]: v },

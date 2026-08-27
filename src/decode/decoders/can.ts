@@ -36,7 +36,14 @@ export const canDecoder: Decoder = {
         id: "bitrate",
         desc: "Bit rate",
         default: 500000,
-        presets: [125000, 250000, 500000, 1000000],
+        // CiA 301's bit-timing table is 1000/800/500/250/125/50/20/10 kbit/s —
+        // 100k is not in it. It is in CiA 305's LSS table (index 5), and is
+        // common in practice, so it belongs here too; it is also what the app's
+        // own demo capture ships. Rates outside both tables (83.333k automotive
+        // body buses, say) go in via the "Custom…" entry.
+        presets: [
+          10000, 20000, 50000, 100000, 125000, 250000, 500000, 800000, 1000000,
+        ],
       },
     ],
     annotations: [

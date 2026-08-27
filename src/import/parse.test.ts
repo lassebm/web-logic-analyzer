@@ -12,7 +12,7 @@ import {
   MAX_SAMPLES,
   VcdAccumulator,
 } from "./parse";
-import { CHANNEL_NAMES } from "../usb/constants";
+import { CHANNEL_NAMES } from "../device/channels";
 
 function bufOf(bytes: number[], rate = 1_000_000): CaptureBuffer {
   const b = new CaptureBuffer(rate, 64);

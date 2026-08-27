@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import { render, screen } from "@testing-library/svelte";
+import { get } from "svelte/store";
 import { tick } from "svelte";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import DeviceBar from "./DeviceBar.svelte";
-import { connStatus, statusMessage, deviceLabel } from "../stores/session";
+import {
+  connStatus,
+  statusMessage,
+  deviceLabel,
+  backendId,
+  setBackend,
+} from "../stores/session";
 
 // DeviceBar only renders its connection UI when WebUSB is "supported"
 // (navigator.usb present). jsdom has no WebUSB, so we install a minimal stub
@@ -20,6 +27,7 @@ beforeEach(() => {
   connStatus.set("disconnected");
   statusMessage.set("");
   deviceLabel.set("");
+  setBackend("fx2");
 });
 
 afterAll(() => {
@@ -60,5 +68,44 @@ describe("DeviceBar render states", () => {
     render(DeviceBar);
     await tick();
     expect(screen.getByText("Ready")).toBeInTheDocument();
+  });
+
+  // A SUMP device's label is much longer than an FX2's, so it can still outrun
+  // the bar on a narrow window — the full text has to stay reachable rather
+  // than being silently clipped to "…262".
+  it("keeps the whole device label available when it is too long to show", async () => {
+    const long = "ESP32-C3 SUMP emulator — 8 channels, 262,144 samples";
+    connStatus.set("ready");
+    deviceLabel.set(long);
+    render(DeviceBar);
+    await tick();
+    expect(screen.getByText(long)).toHaveAttribute("title", long);
+  });
+
+  it("offers a backend selector, enabled only while disconnected", async () => {
+    render(DeviceBar);
+    await tick();
+    const select = screen.getByLabelText("Device") as HTMLSelectElement;
+    expect(select).toBeEnabled();
+    expect([...select.options].map((o) => o.value)).toEqual(["fx2", "sump"]);
+    expect(select.value).toBe("fx2");
+
+    // Switching families mid-connection would strand the connected device.
+    connStatus.set("ready");
+    await tick();
+    expect(select).toBeDisabled();
+  });
+
+  it("hides the Firmware chip for a backend that has no firmware to load", async () => {
+    render(DeviceBar);
+    await tick();
+    expect(
+      screen.getByRole("button", { name: /^Firmware:/ }),
+    ).toBeInTheDocument();
+
+    setBackend("sump");
+    await tick();
+    expect(screen.queryByRole("button", { name: /^Firmware:/ })).toBeNull();
+    expect(get(backendId)).toBe("sump");
   });
 });

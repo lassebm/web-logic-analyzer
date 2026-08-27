@@ -12,28 +12,36 @@
     setChannelEnabled,
     setAllChannelsEnabled,
     unsavedCapture,
+    capabilities,
+    CAPTURE_COUNTS,
+    CAPTURES_UNTIL_STOPPED,
   } from "../stores/session";
   import ConfirmButton from "./ConfirmButton.svelte";
-  import {
-    SAMPLE_RATES,
-    formatSampleRate,
-    bandwidthWarning,
-  } from "../usb/sampleRate";
+  import { formatSampleRate, bandwidthWarning } from "../usb/sampleRate";
   import { formatTime } from "../view/renderer";
   import { formatSampleCount } from "./format";
-  import { CHANNEL_NAMES, NUM_CHANNELS } from "../usb/constants";
+  import { CHANNEL_NAMES } from "../device/channels";
   import type { TriggerEdge } from "../model/trigger";
   import { follow } from "../stores/navigation";
   import InfoTip from "./InfoTip.svelte";
 
-  const EDGES: { value: TriggerEdge | "off"; label: string }[] = [
-    { value: "off", label: "None" },
+  /** Trigger conditions besides "None", which the markup lists on its own. */
+  const CONDITIONS: { value: TriggerEdge; label: string }[] = [
     { value: "rising", label: "Rising ↑" },
     { value: "falling", label: "Falling ↓" },
     { value: "high", label: "High" },
     { value: "low", label: "Low" },
     { value: "any", label: "Either ↕" },
   ];
+  // A device with a trigger unit can only wait on a level: a SUMP stage matches
+  // a level pattern, never a transition. Edges still work — found in the samples
+  // afterwards — so they are grouped, not removed.
+  const LEVEL_CONDITIONS = CONDITIONS.filter(
+    (c) => c.value === "high" || c.value === "low",
+  );
+  const EDGE_CONDITIONS = CONDITIONS.filter(
+    (c) => !LEVEL_CONDITIONS.includes(c),
+  );
 
   // Per-channel trigger selection derived from the spec.
   function edgeFor(ch: number): TriggerEdge | "off" {
@@ -58,7 +66,14 @@
     config.update((cfg) => ({ ...cfg, trigger: { conditions: [] } }));
   }
 
-  let warning = $derived(bandwidthWarning($config.sampleRate));
+  // Rates, sample counts and channel count all come from the connected device
+  // (and, while disconnected, from the selected backend's defaults).
+  let channels = $derived($capabilities.channels);
+  // The USB-bandwidth ceiling is an FX2 streaming concern; a device that dumps a
+  // buffer afterwards can't outrun the link.
+  let warning = $derived(
+    $capabilities.streaming ? bandwidthWarning($config.sampleRate) : null,
+  );
   let durationSec = $derived($config.sampleLimit / $config.sampleRate);
 
   let running = $derived($captureStatus === "running");
@@ -91,7 +106,7 @@
   <div class="field">
     <label for="rate">Sample rate</label>
     <select id="rate" bind:value={$config.sampleRate}>
-      {#each SAMPLE_RATES as r (r)}
+      {#each $capabilities.sampleRates as r (r)}
         <option value={r}>{formatSampleRate(r)}</option>
       {/each}
     </select>
@@ -100,8 +115,30 @@
   <div class="field">
     <label for="limit">Samples</label>
     <select id="limit" bind:value={$config.sampleLimit}>
-      {#each [10000, 100000, 1000000, 5000000, 10000000, 50000000, 100000000] as n (n)}
+      {#each $capabilities.sampleLimits as n (n)}
         <option value={n}>{formatSampleCount(n)}</option>
+      {/each}
+    </select>
+  </div>
+
+  <div class="field">
+    <span class="flabel">
+      <label for="captures">Captures</label>
+      <InfoTip label="How repeat captures work" width={260}>
+        Take several captures back to back, then step through them with the
+        <strong>Capture</strong> pager above the waveform. Each one is a
+        separate recording — the time between them is not recorded, so they are
+        separate events rather than one long capture. With a trigger set, a
+        fixed count collects that many occurrences to compare, while
+        <span class="mono">Until stopped</span> ends as soon as one fires — for catching
+        something you can't time by hand.
+      </InfoTip>
+    </span>
+    <select id="captures" bind:value={$config.captures}>
+      {#each CAPTURE_COUNTS as n (n)}
+        <option value={n}
+          >{n === CAPTURES_UNTIL_STOPPED ? "Until stopped" : n}</option
+        >
       {/each}
     </select>
   </div>
@@ -116,24 +153,30 @@
     </span>
   </div>
 
-  <div class="field">
-    <span class="flabel">
-      Live view
-      <InfoTip label="How the live view works" width={250}>
-        While capturing, keep the newest samples in view, auto-zooming to the
-        signal's activity so it stays readable as it streams. Turn off to keep a
-        fixed view of the whole capture that fills in from the left. Either way,
-        the whole capture is fitted to the view when the run ends.
-      </InfoTip>
-    </span>
-    <label
-      class="toggle"
-      title="Keep the newest samples in view while capturing (roll)"
-    >
-      <input type="checkbox" bind:checked={$follow} />
-      <span>Follow</span>
-    </label>
-  </div>
+  <!-- Only for a device that streams. A one-shot device sends everything in a
+       single dump once the run is over, so there is never anything to follow;
+       a permanently dead toggle would be noise, and stores/navigation.ts gates
+       the behaviour to match (see the Serial Monitor tab, hidden likewise). -->
+  {#if $capabilities.streaming}
+    <div class="field">
+      <span class="flabel">
+        Live view
+        <InfoTip label="How the live view works" width={250}>
+          While capturing, keep the newest samples in view, auto-zooming to the
+          signal's activity so it stays readable as it streams. Turn off to keep
+          a fixed view of the whole capture that fills in from the left. Either
+          way, the whole capture is fitted to the view when the run ends.
+        </InfoTip>
+      </span>
+      <label
+        class="toggle"
+        title="Keep the newest samples in view while capturing (roll)"
+      >
+        <input type="checkbox" bind:checked={$follow} />
+        <span>Follow</span>
+      </label>
+    </div>
+  {/if}
 
   <div class="divider" aria-hidden="true"></div>
 
@@ -141,7 +184,7 @@
     <div class="chan-grid">
       <div class="crow">
         <span class="rowlabel">Channels</span>
-        {#each Array(NUM_CHANNELS) as _, ch (ch)}
+        {#each Array(channels) as _, ch (ch)}
           <button
             class="cell chip"
             class:on={$config.enabledChannels[ch]}
@@ -169,20 +212,39 @@
             One trigger for the whole capture: it fires at the first sample
             where
             <strong>all</strong> the per-channel conditions are met at once
-            (AND). Leave every channel on <span class="mono">None</span> to start
-            at the beginning of the capture.
+            (AND). Leave every channel on <span class="mono">None</span> to
+            start at the beginning of the capture.
+            {#if $capabilities.hardwareTrigger}
+              This device triggers in hardware on <span class="mono">High</span>
+              / <span class="mono">Low</span> conditions; edges are found in the samples
+              afterwards instead.
+            {/if}
           </InfoTip>
         </span>
-        {#each Array(NUM_CHANNELS) as _, ch (ch)}
+        {#each Array(channels) as _, ch (ch)}
           <select
             class="cell edge"
             value={edgeFor(ch)}
             onchange={(e) => setEdge(ch, e.currentTarget.value)}
-            title="Software trigger condition for {CHANNEL_NAMES[ch]}"
+            title="Trigger condition for {CHANNEL_NAMES[ch]}"
           >
-            {#each EDGES as ed (ed.value)}
-              <option value={ed.value}>{ed.label}</option>
-            {/each}
+            <option value="off">None</option>
+            {#if $capabilities.hardwareTrigger}
+              <optgroup label="Hardware — device waits">
+                {#each LEVEL_CONDITIONS as ed (ed.value)}
+                  <option value={ed.value}>{ed.label}</option>
+                {/each}
+              </optgroup>
+              <optgroup label="Software — found after capture">
+                {#each EDGE_CONDITIONS as ed (ed.value)}
+                  <option value={ed.value}>{ed.label}</option>
+                {/each}
+              </optgroup>
+            {:else}
+              {#each CONDITIONS as ed (ed.value)}
+                <option value={ed.value}>{ed.label}</option>
+              {/each}
+            {/if}
           </select>
         {/each}
         {#if $config.trigger.conditions.length > 0}

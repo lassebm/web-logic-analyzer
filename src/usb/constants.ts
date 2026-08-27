@@ -1,7 +1,7 @@
-// Protocol constants for FX2LP / fx2lafw devices.
+// Protocol constants for FX2 / fx2lafw devices.
 // Sourced from libsigrok: src/ezusb.c, src/hardware/fx2lafw/{api,protocol}.{c,h}.
 
-/** Cypress FX2LP bootloader vendor request for RAM read/write ("firmware load"). */
+/** Cypress FX2 bootloader vendor request for RAM read/write ("firmware load"). */
 export const REQ_FIRMWARE_LOAD = 0xa0;
 
 /** CPUCS register address; bit 0 (8051RES) holds/releases the CPU in reset. */
@@ -120,9 +120,3 @@ export const USB_FILTERS: USBDeviceFilter[] = [
 export const SIGROK_MANUFACTURER = "sigrok";
 /** Product string reported by a device already running fx2lafw. */
 export const FX2LAFW_PRODUCT = "fx2lafw";
-
-/** Number of logic channels in 8-bit mode. */
-export const NUM_CHANNELS = 8;
-
-/** Display names for the 8 logic channels, indexed by channel number. */
-export const CHANNEL_NAMES = ["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"];

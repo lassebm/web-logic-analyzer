@@ -20,7 +20,7 @@ describe("DeviceBar", () => {
   it("shows a WebUSB-unavailable message when navigator.usb is missing", () => {
     // jsdom has no navigator.usb, so the app should tell the user WebUSB is unavailable.
     render(DeviceBar);
-    expect(screen.getByText(/WebUSB unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/WebUSB is not available/i)).toBeInTheDocument();
     // The Connect button should not be offered.
     expect(
       screen.queryByRole("button", { name: /connect device/i }),

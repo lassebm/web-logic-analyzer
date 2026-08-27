@@ -1,4 +1,4 @@
-import { CHANNEL_NAMES } from "../usb/constants";
+import { CHANNEL_NAMES } from "../device/channels";
 
 export interface ParsedCapture {
   /** Recovered sample rate (Hz). */
