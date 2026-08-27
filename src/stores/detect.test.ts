@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { get } from "svelte/store";
 import {
   captureBuffer,
+  captureStatus,
   config,
   decoders,
   detections,
@@ -18,6 +19,7 @@ const BAUD = 115200;
 const BYTES = [0x55, 0x41, 0x0d, 0x0a, 0x48, 0x69, 0x2e];
 
 beforeEach(() => {
+  captureStatus.set("idle");
   captureBuffer.set(null);
   detections.set(null);
   decoders.set([]);
@@ -65,6 +67,21 @@ describe("runDetection", () => {
     }));
     runDetection();
     expect(get(detections)).toEqual([]); // scanned, nothing on the other channels
+  });
+});
+
+describe("runDetection while a run is in flight", () => {
+  it("refuses, leaving any open results alone", () => {
+    captureBuffer.set(uartBytes(BYTES, SR / BAUD, SR));
+    runDetection();
+    const found = get(detections);
+    expect(found?.length).toBeGreaterThan(0);
+
+    // A scan here would block the main thread the FX2's queue depends on.
+    captureStatus.set("running");
+    detections.set(found);
+    runDetection();
+    expect(get(detections)).toBe(found);
   });
 });
 

@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { captureBuffer, captureTick, config } from "../stores/session";
+  import {
+    captureBuffer,
+    captureTick,
+    config,
+    captureRunning,
+  } from "../stores/session";
   import { csvChunks } from "../export/csv";
   import { vcdChunks } from "../export/vcd";
   import {
@@ -49,15 +54,28 @@
 
   // The `$captureTick < 0` term (always false) keeps this reactive to ticks,
   // since the buffer fills by mutation rather than by re-setting the store.
+  // Disabled mid-run as well: the buffer is still growing, so the file would be
+  // an arbitrary snapshot of it, and the work competes with the stream for the
+  // main thread.
   let disabled = $derived(
-    $captureTick < 0 || ($captureBuffer?.sampleCount ?? 0) === 0,
+    $captureTick < 0 ||
+      ($captureBuffer?.sampleCount ?? 0) === 0 ||
+      $captureRunning,
   );
 </script>
 
 <div class="export">
   <span class="lbl">Export</span>
-  <button disabled={disabled || busy} onclick={() => run("csv")}>CSV</button>
-  <button disabled={disabled || busy} onclick={() => run("vcd")}>VCD</button>
+  <button
+    disabled={disabled || busy}
+    title={$captureRunning ? "Available when the run finishes" : undefined}
+    onclick={() => run("csv")}>CSV</button
+  >
+  <button
+    disabled={disabled || busy}
+    title={$captureRunning ? "Available when the run finishes" : undefined}
+    onclick={() => run("vcd")}>VCD</button
+  >
   {#if busy}
     <span class="progress" role="status" aria-live="polite">
       {Math.round(progress * 100)}%

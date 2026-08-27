@@ -19,6 +19,7 @@
     captureTick,
     detections,
     toggleDetection,
+    captureRunning,
   } from "../stores/session";
   import {
     zoomToFit,
@@ -159,12 +160,14 @@
           {/if}
           <button
             class:active={$detections !== null}
-            disabled={!hasCapture}
+            disabled={!hasCapture || $captureRunning}
             onclick={toggleDetection}
             aria-expanded={$detections !== null}
-            title={$detections !== null
-              ? "Hide detection results"
-              : "Scan active channels for supported protocols and detect their settings"}
+            title={$captureRunning
+              ? "Available when the run finishes — scanning would starve the capture"
+              : $detections !== null
+                ? "Hide detection results"
+                : "Scan active channels for supported protocols and detect their settings"}
             >Detect</button
           >
           <span class="sep"></span>

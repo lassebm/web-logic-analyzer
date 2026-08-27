@@ -141,3 +141,20 @@ describe("capture pager", () => {
     expect(mark).not.toHaveClass("on"); // ...just not visible
   });
 });
+
+describe("Detect", () => {
+  // Detect is O(capture) on the main thread, and that thread is what keeps the
+  // FX2's transfer queue fed — scanning mid-run starves the stream.
+  it("disables Detect while a run is still going", async () => {
+    const buf = new CaptureBuffer(1_000_000, 64);
+    buf.append(new Uint8Array(64).fill(1));
+    captureBuffer.set(buf);
+    render(App);
+    await tick();
+    expect(screen.getByRole("button", { name: "Detect" })).toBeEnabled();
+
+    captureStatus.set("running");
+    await tick();
+    expect(screen.getByRole("button", { name: "Detect" })).toBeDisabled();
+  });
+});

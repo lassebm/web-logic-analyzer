@@ -179,6 +179,19 @@ export const config = writable<CaptureConfigState>({
 applyCapabilities(get(capabilities));
 
 export const captureStatus = writable<CaptureStatus>("idle");
+/**
+ * True for the whole of a Run, captures-back-to-back included.
+ *
+ * Gates the actions that work on a finished capture — Detect, Import, Export.
+ * Each of them is O(capture) work on the main thread, and the main thread is
+ * what keeps the FX2's transfer queue fed: block it and the FIFO overflows, the
+ * stream never comes back, and the stall watchdog ends the run (see AGENTS.md).
+ * Import is worse than slow — it would swap the buffer the run is filling.
+ */
+export const captureRunning = derived(
+  captureStatus,
+  ($status) => $status === "running",
+);
 export const captureBuffer = writable<CaptureBuffer | null>(null);
 export const captureTick = writable<number>(0); // bumped as samples stream in
 export const captureSamples = writable<number>(0); // live count of collected samples
@@ -1013,6 +1026,9 @@ export function runAllDecoders(range?: { start: number; end: number }): void {
  * capture.
  */
 export function runDetection(): void {
+  // Refused mid-run, as the toolbar's disabled state already is: the scan is
+  // O(capture) on the main thread, which is the thread keeping the FX2 fed.
+  if (get(captureStatus) === "running") return;
   const buf = get(captureBuffer);
   if (!buf || buf.sampleCount === 0) {
     detections.set(null);

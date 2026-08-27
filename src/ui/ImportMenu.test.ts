@@ -29,6 +29,16 @@ describe("ImportMenu", () => {
     expect(get(captureStatus)).toBe("done");
   });
 
+  // Importing mid-run would replace the very buffer the capture is filling.
+  it("disables the file button while a run is in flight", async () => {
+    render(ImportMenu);
+    expect(screen.getByRole("button", { name: "File…" })).toBeEnabled();
+    captureStatus.set("running");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "File…" })).toBeDisabled(),
+    );
+  });
+
   it("shows an error for an unrecognized file", async () => {
     const { container } = render(ImportMenu);
     const input = container.querySelector(

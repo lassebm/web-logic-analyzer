@@ -2,17 +2,30 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ExportMenu from "./ExportMenu.svelte";
-import { captureBuffer, config } from "../stores/session";
+import { captureBuffer, captureStatus, config } from "../stores/session";
 import { CaptureBuffer } from "../model/capture";
 import { defaultConfig } from "../test/fixtures";
 
 beforeEach(() => {
   captureBuffer.set(null);
+  captureStatus.set("idle");
   config.set(defaultConfig());
 });
 
 describe("ExportMenu", () => {
   it("disables export buttons without a capture", () => {
+    render(ExportMenu);
+    expect(screen.getByRole("button", { name: "CSV" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "VCD" })).toBeDisabled();
+  });
+
+  // Mid-run the buffer is still growing, so the file would be an arbitrary
+  // snapshot of it — and the work competes with the stream for the main thread.
+  it("disables export while a run is in flight", async () => {
+    const buf = new CaptureBuffer(1_000_000, 8);
+    buf.append(new Uint8Array([0b01, 0b10]));
+    captureBuffer.set(buf);
+    captureStatus.set("running");
     render(ExportMenu);
     expect(screen.getByRole("button", { name: "CSV" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "VCD" })).toBeDisabled();

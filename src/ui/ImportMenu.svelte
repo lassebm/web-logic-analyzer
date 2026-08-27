@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { loadCapture, monitorActive } from "../stores/session";
+  import {
+    loadCapture,
+    monitorActive,
+    captureRunning,
+  } from "../stores/session";
   import { importFile } from "../import/importer";
 
   let input: HTMLInputElement | undefined = $state();
@@ -32,9 +36,11 @@
 <div class="import">
   <span class="lbl">Import</span>
   <button
-    disabled={busy || $monitorActive}
+    disabled={busy || $monitorActive || $captureRunning}
     onclick={() => input?.click()}
-    title="Load a CSV or VCD capture file"
+    title={$captureRunning
+      ? "Available when the run finishes — importing would replace the capture being filled"
+      : "Load a CSV or VCD capture file"}
     >{busy ? "Importing…" : "File…"}</button
   >
   <input
