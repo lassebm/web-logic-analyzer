@@ -15,6 +15,7 @@
  * `(b,a)` and keeps the better one. Pure and dependency-free like the decoders.
  */
 import type { CaptureBuffer } from "../../model/capture";
+import type { ScanWindow } from "./window";
 import { runDecoder } from "../engine";
 import { i2cDecoder } from "../decoders/i2c";
 import type { I2cDetection } from "./types";
@@ -61,9 +62,17 @@ interface PairShape {
  * Data edges coincident with an SCL edge are ignored (they sit on a phase
  * boundary, not inside the valid window).
  */
-function analysePair(buf: CaptureBuffer, scl: number, sda: number): PairShape {
-  let prevScl = buf.channelValueAt(scl, 0);
-  let prevSda = buf.channelValueAt(sda, 0);
+function analysePair(
+  buf: CaptureBuffer,
+  scl: number,
+  sda: number,
+  range?: ScanWindow,
+): PairShape {
+  // Seed from the sample before the window, so an edge landing on its first
+  // sample is still seen as an edge.
+  const at = range ? Math.max(0, Math.floor(range.start) - 1) : 0;
+  let prevScl = buf.channelValueAt(scl, at);
+  let prevSda = buf.channelValueAt(sda, at);
   let inHigh = prevScl === 1;
   let dirty = false;
   let highPhases = 0;
@@ -71,7 +80,10 @@ function analysePair(buf: CaptureBuffer, scl: number, sda: number): PairShape {
   let sdaEdgesHigh = 0;
   let sdaEdgesLow = 0;
 
-  for (const i of buf.transitions()) {
+  const transitions = range
+    ? buf.transitionsIn(range.start, range.end)
+    : buf.transitions();
+  for (const i of transitions) {
     const s = buf.channelValueAt(scl, i);
     const d = buf.channelValueAt(sda, i);
     const sclChanged = s !== prevScl;
@@ -121,10 +133,16 @@ export function detectI2c(
   buf: CaptureBuffer,
   scl: number,
   sda: number,
+  range?: ScanWindow,
 ): I2cDetection | null {
   if (buf.sampleCount === 0 || scl === sda) return null;
 
-  const { stability, highPhases, highEdgeRatio } = analysePair(buf, scl, sda);
+  const { stability, highPhases, highEdgeRatio } = analysePair(
+    buf,
+    scl,
+    sda,
+    range,
+  );
   if (
     highPhases < MIN_HIGH_PHASES ||
     stability < MIN_STABILITY ||
@@ -135,7 +153,7 @@ export function detectI2c(
   // Confirm the pair frames into addressed bytes inside a complete transaction:
   // a START, at least a couple of bytes, and a STOP. Requiring the STOP rejects
   // pairs that merely produce a stray start-like edge and some clocking.
-  const { annotations } = runDecoder(i2cDecoder, buf, [scl, sda], {});
+  const { annotations } = runDecoder(i2cDecoder, buf, [scl, sda], {}, range);
   const hasStart = annotations.some((a) => a.annClass === ANN_START);
   const hasStop = annotations.some((a) => a.annClass === ANN_STOP);
   const byteCount = annotations.filter(

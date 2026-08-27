@@ -14,6 +14,7 @@
  * decoders themselves.
  */
 import type { CaptureBuffer } from "../../model/capture";
+import type { ScanWindow } from "./window";
 import { runDecoder } from "../engine";
 import { uartDecoder } from "../decoders/uart";
 import type { UartDetection } from "./types";
@@ -62,9 +63,16 @@ interface Scored extends Candidate {
 }
 
 /** Sample indices where `channel` changes value (per-channel edges). */
-function channelEdges(buf: CaptureBuffer, channel: number): number[] {
+function channelEdges(
+  buf: CaptureBuffer,
+  channel: number,
+  range?: ScanWindow,
+): number[] {
   const edges: number[] = [];
-  for (const i of buf.transitions()) {
+  const transitions = range
+    ? buf.transitionsIn(range.start, range.end)
+    : buf.transitions();
+  for (const i of transitions) {
     if (buf.channelValueAt(channel, i) !== buf.channelValueAt(channel, i - 1))
       edges.push(i);
   }
@@ -112,15 +120,22 @@ function score(
   buf: CaptureBuffer,
   channel: number,
   c: Candidate,
+  range?: ScanWindow,
 ): Scored | null {
-  const { annotations, packets } = runDecoder(uartDecoder, buf, [channel], {
-    baudrate: c.baudrate,
-    data_bits: c.data_bits,
-    parity: c.parity,
-    stop_bits: 1,
-    bit_order: "lsb-first",
-    invert: c.invert,
-  });
+  const { annotations, packets } = runDecoder(
+    uartDecoder,
+    buf,
+    [channel],
+    {
+      baudrate: c.baudrate,
+      data_bits: c.data_bits,
+      parity: c.parity,
+      stop_bits: 1,
+      bit_order: "lsb-first",
+      invert: c.invert,
+    },
+    range,
+  );
   const frames = packets.length;
   if (frames === 0) return null;
   const errors = annotations.filter(
@@ -154,10 +169,11 @@ function simplicity(c: Candidate): number {
 export function detectUart(
   buf: CaptureBuffer,
   channel: number,
+  range?: ScanWindow,
 ): UartDetection | null {
   if (buf.sampleCount === 0) return null;
 
-  const edges = channelEdges(buf, channel);
+  const edges = channelEdges(buf, channel, range);
   if (edges.length < 4) return null; // idle / static line
 
   const unit = robustUnitWidth(edges);
@@ -171,7 +187,7 @@ export function detectUart(
   // constant repeating byte (< 2 distinct values) is how a plain clock aliases,
   // so it doesn't count as data.
   const viable = candidates
-    .map((c) => score(buf, channel, c))
+    .map((c) => score(buf, channel, c, range))
     .filter(
       (s): s is Scored =>
         s !== null &&

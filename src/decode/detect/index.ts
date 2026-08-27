@@ -11,6 +11,7 @@ import type { CaptureBuffer } from "../../model/capture";
 import { detectUart } from "./uart";
 import { detectI2c } from "./i2c";
 import type { Detection, I2cDetection } from "./types";
+import { scanWindows, type ScanWindow } from "./window";
 
 export { detectUart } from "./uart";
 export { detectI2c } from "./i2c";
@@ -27,12 +28,32 @@ function detectI2cPair(
   buf: CaptureBuffer,
   a: number,
   b: number,
+  range?: ScanWindow,
 ): I2cDetection | null {
-  const forward = detectI2c(buf, a, b);
-  const swapped = detectI2c(buf, b, a);
+  const forward = detectI2c(buf, a, b, range);
+  const swapped = detectI2c(buf, b, a, range);
   if (forward && swapped)
     return forward.confidence >= swapped.confidence ? forward : swapped;
   return forward ?? swapped;
+}
+
+/**
+ * Run `find` over each scan window in turn and keep the first hit.
+ *
+ * Windows bound the work (see ./window.ts); trying the later ones only when the
+ * earlier found nothing is what keeps a signal that starts late reachable at no
+ * cost on the common case, where the first window hits.
+ */
+function firstInWindows<T>(
+  buf: CaptureBuffer,
+  channels: number[],
+  find: (range: ScanWindow) => T | null,
+): T | null {
+  for (const range of scanWindows(buf, channels)) {
+    const hit = find(range);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /**
@@ -57,7 +78,11 @@ export function scanChannels(
   const i2cCandidates: I2cDetection[] = [];
   for (let i = 0; i < channels.length; i++)
     for (let j = i + 1; j < channels.length; j++) {
-      const d = detectI2cPair(buf, channels[i], channels[j]);
+      const a = channels[i];
+      const b = channels[j];
+      const d = firstInWindows(buf, [a, b], (range) =>
+        detectI2cPair(buf, a, b, range),
+      );
       if (d) i2cCandidates.push(d);
     }
   i2cCandidates.sort(
@@ -74,7 +99,7 @@ export function scanChannels(
   // UART: one candidate per remaining (unclaimed) channel.
   for (const ch of channels) {
     if (claimed.has(ch)) continue;
-    const u = detectUart(buf, ch);
+    const u = firstInWindows(buf, [ch], (range) => detectUart(buf, ch, range));
     if (u) hits.push(u);
   }
 

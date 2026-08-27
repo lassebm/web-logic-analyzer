@@ -175,18 +175,6 @@ function advance(
 }
 
 /** Edge (transition) sample indices within [start, end), scanned directly. */
-function windowTransitions(
-  buf: CaptureBuffer,
-  start: number,
-  end: number,
-): Uint32Array {
-  const idx: number[] = [];
-  for (let i = Math.max(1, start); i < end; i++) {
-    if (buf.byteAt(i) !== buf.byteAt(i - 1)) idx.push(i);
-  }
-  return Uint32Array.from(idx);
-}
-
 /**
  * Run a decoder over a capture buffer. `channelMap` maps the decoder's logical
  * channels to physical capture channels; `options` supplies option values.
@@ -243,9 +231,7 @@ export function runDecoder(
     : buf.sampleCount;
   if (end <= start) return { annotations, packets };
 
-  const transitions = range
-    ? windowTransitions(buf, start, end)
-    : buf.transitions();
+  const transitions = range ? buf.transitionsIn(start, end) : buf.transitions();
   // One sample before the window: waits match transitions strictly after the
   // current position, so starting *at* `start` skipped an edge landing there.
   state.samplenum = Math.max(0, start - 1);

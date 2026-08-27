@@ -186,6 +186,56 @@ export class CaptureBuffer {
   }
 
   /**
+   * Transitions inside [start, end), as a view when possible.
+   *
+   * Two routes, and which one is taken matters. If the full index is already
+   * built and current, this binary-searches it and hands back a `subarray` — no
+   * copy, O(log n). Otherwise it scans the window's samples, which is O(window)
+   * but never touches the rest of the buffer: that is the route a live capture
+   * needs, since building the full index per streamed chunk would be O(n²) over
+   * a run (see AGENTS.md's O(chunk) rule).
+   *
+   * So a window over a *finished* capture is nearly free however wide it is,
+   * while a window over a *growing* one costs what it spans. Detection relies on
+   * the first; the in-view live decode relies on the second.
+   */
+  transitionsIn(start: number, end: number): Uint32Array {
+    const from = Math.max(1, Math.floor(start));
+    const to = Math.min(this.length, Math.ceil(end));
+    if (to <= from) return new Uint32Array(0);
+
+    if (this._transitions && this._transitionsLen === this.length) {
+      const idx = this._transitions;
+      let lo = 0;
+      let hi = idx.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (idx[mid] < from) lo = mid + 1;
+        else hi = mid;
+      }
+      const begin = lo;
+      hi = idx.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (idx[mid] < to) lo = mid + 1;
+        else hi = mid;
+      }
+      return idx.subarray(begin, lo);
+    }
+
+    let count = 0;
+    for (let i = from; i < to; i++) {
+      if (this.data[i] !== this.data[i - 1]) count++;
+    }
+    const out = new Uint32Array(count);
+    let w = 0;
+    for (let i = from; i < to; i++) {
+      if (this.data[i] !== this.data[i - 1]) out[w++] = i;
+    }
+    return out;
+  }
+
+  /**
    * Min/max of a channel over [start, end) as a pair suitable for downsampled
    * rendering: returns [min, max] where each is 0 or 1. If any sample is high
    * and any is low, returns [0, 1] (an edge occurred in the window).

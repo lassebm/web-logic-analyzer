@@ -70,6 +70,12 @@ alone won't teach you. Read the files for the actual APIs.
   live view can decode just the window on screen. `detect/` auto-detects protocols;
   `scanChannels` scores all I²C pairs and claims strongest-first — so a weak false pair
   can't steal a real bus's line — before single-channel UART runs on what's left.
+  Identifying is far more expensive than decoding — a UART costs one trial decode
+  per candidate framing, so eight active channels is hundreds of passes — which is
+  why `window.ts` bounds each pass to a fixed number of _edges_ rather than the
+  buffer. Cost is then flat in capture length (measurements in that file); windows
+  are anchored at the scanned channels' first edge and retried further along, so a
+  line that only talks late is still found.
 - `sump/` — the SUMP/OLS driver: `protocol.ts` (pure command encoding),
   `metadata.ts` (the `0x04` TLV parser), `profiles.ts` (fallbacks for what a
   device's metadata leaves out, plus the one thing metadata can't report —

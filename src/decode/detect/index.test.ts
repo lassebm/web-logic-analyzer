@@ -5,6 +5,25 @@ import { i2cLevels, packLevels, uartFrameLevels } from "../../test/waveforms";
 const I2C_BYTES = [(0x50 << 1) | 0, 0xab, 0xcd];
 
 describe("scanChannels", () => {
+  // Scans are bounded to a window now (see ./window.ts), and the window is
+  // anchored where the channel first has an edge — not at sample 0. A line that
+  // idles through most of a long capture and only then talks is still found.
+  it("finds a signal that only appears late in a long capture", () => {
+    const sampleRate = 1_000_000;
+    const baud = 115200;
+    const IDLE = 400_000; // ~0.4 s of quiet before anything happens
+    const levels: number[] = new Array(IDLE).fill(1); // UART idles high
+    for (const b of [0x55, 0x41, 0x0d, 0x0a, 0x48])
+      levels.push(...uartFrameLevels(b, sampleRate / baud));
+
+    const buf = packLevels(sampleRate, levels);
+    const hits = scanChannels(buf, [0]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].kind).toBe("uart");
+    if (hits[0].kind !== "uart") throw new Error("expected UART");
+    expect(hits[0].baudrate).toBe(baud);
+  });
+
   it("returns UART hits sorted by channel and skips silent lines", () => {
     const sampleRate = 1_000_000;
     const baud = 115200;

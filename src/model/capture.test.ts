@@ -174,6 +174,47 @@ describe("CaptureBuffer", () => {
     expect(buf.baseSample).toBe(3);
   });
 });
+describe("transitionsIn", () => {
+  /** 0,1,0,1… on channel 0: an edge at every sample from 1 on. */
+  function toggling(n: number): CaptureBuffer {
+    const buf = new CaptureBuffer(1_000_000, n);
+    const data = new Uint8Array(n);
+    for (let i = 0; i < n; i++) data[i] = i & 1;
+    buf.append(data);
+    return buf;
+  }
+
+  it("returns only the transitions inside the window", () => {
+    const buf = toggling(20);
+    expect(Array.from(buf.transitionsIn(5, 9))).toEqual([5, 6, 7, 8]);
+  });
+
+  it("clamps to the buffer and returns nothing for an empty window", () => {
+    const buf = toggling(10);
+    expect(Array.from(buf.transitionsIn(-5, 3))).toEqual([1, 2]);
+    expect(buf.transitionsIn(8, 8)).toHaveLength(0);
+    expect(buf.transitionsIn(9, 4)).toHaveLength(0);
+  });
+
+  // Two routes with one answer: a slice of the built index, or a scan of the
+  // window when the index is stale. A live capture takes the second, so they
+  // must not disagree.
+  it("agrees whether or not the full index is already built", () => {
+    const scanned = toggling(64); // index never asked for: scans the window
+    const sliced = toggling(64);
+    sliced.transitions(); // build and cache the full index first
+    expect(Array.from(scanned.transitionsIn(10, 40))).toEqual(
+      Array.from(sliced.transitionsIn(10, 40)),
+    );
+  });
+
+  it("hands back a view of the built index rather than a copy", () => {
+    const buf = toggling(64);
+    const full = buf.transitions();
+    expect(buf.transitionsIn(10, 40).buffer).toBe(full.buffer);
+  });
+});
+
 describe("min/max pyramid incremental updates", () => {
   // The levels above level 0 are now reduced from the first dirty cell rather
   // than rebuilt in full, so a query made *between* appends must give the same
