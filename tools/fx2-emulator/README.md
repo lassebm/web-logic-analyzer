@@ -234,7 +234,11 @@ Change the interval or the text with the build flags in `platformio.ini`:
   decode; there's just less of them.
 - **A rate far below a protocol's bit rate produces nonsense**, exactly as it
   would with real hardware — 115200 baud UART can't survive 100 kHz sampling.
-  The app warns about this; 1–4 MHz shows everything cleanly.
+  The app warns about this. What is _not_ a limit any more is an awkward ratio:
+  every edge is placed from its absolute time, so the pattern holds its real bit
+  rates at any rate rather than only at the ones that divide evenly. The demo
+  UART reads back cleanly from ~230 kHz up (measured); 1–4 MHz is still the
+  easiest place to look at everything.
 - **The 16-bit capture mode isn't emulated.** The app never asks for it (it
   captures in fx2lafw's 8-bit mode); if something ever does, the log says so and
   the emulator keeps streaming 8-bit.

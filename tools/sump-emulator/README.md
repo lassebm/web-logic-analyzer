@@ -196,7 +196,11 @@ spec-correct device.
   edges are resolved from the samples afterwards and never make the device wait.
 - **A rate far below a protocol's bit rate produces nonsense**, exactly as it
   would with real hardware — 115200 baud UART can't survive 100 kHz sampling.
-  The app warns about this; 1–4 MHz shows everything cleanly.
+  The app warns about this. What is _not_ a limit any more is an awkward ratio:
+  every edge is placed from its absolute time, so the pattern holds its real bit
+  rates at any rate rather than only at the ones that divide evenly. The demo
+  UART reads back cleanly from ~230 kHz up (measured); 1–4 MHz is still the
+  easiest place to look at everything.
 - **Above ~10 MHz the demo cycle is truncated** to a 96 KiB pattern buffer, so
   you see part of a cycle repeated rather than the whole thing. The protocols
   still decode; there's just less of them.
