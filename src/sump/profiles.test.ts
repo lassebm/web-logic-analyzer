@@ -79,6 +79,19 @@ describe("resolveProfile", () => {
     expect(resolved.maxSampleRate).toBe(62_500_000);
   });
 
+  it("drives the SiligoCad sump-la's trigger and takes its numbers from metadata", () => {
+    const resolved = resolveProfile({
+      name: "SiligoCad sump-la",
+      probes: 32,
+      sampleMemory: 32_752,
+      maxSampleRate: 50_000_000,
+    });
+    expect(resolved.hardwareTrigger).toBe(true);
+    expect(resolved.channels).toBe(8);
+    expect(resolved.sampleMemory).toBe(32_752);
+    expect(resolved.maxSampleRate).toBe(50_000_000);
+  });
+
   it("caps channels at what the app can render, however many the device has", () => {
     expect(resolveProfile({ name: "JTAGulator", probes: 24 }).channels).toBe(8);
   });

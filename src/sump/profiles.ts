@@ -111,6 +111,13 @@ const SUMP_PROFILES: SumpProfile[] = [
     hardwareTrigger: false,
   },
   {
+    // SiligoCad sump-la: a SUMP/OLS core for the Gowin GW5A-25A (Tang Primer
+    // 25K). Its metadata reports 32 probes, its memory and a 50 MHz ceiling, so
+    // only the trigger needs saying: it implements the four basic stages.
+    match: /siligocad sump-la/i,
+    hardwareTrigger: true,
+  },
+  {
     // ESP32-Bit-Pirate discards the 0xC0–0xCF trigger commands, so it genuinely
     // has no hardware trigger — this row is why the UI can say so rather than
     // guess. Its depth is heap-derived, so metadata decides that.
