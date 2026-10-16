@@ -567,6 +567,34 @@ describe("session capture (SUMP backend)", () => {
     expect(get(statusMessage)).toMatch(/Captured 64 samples/);
   });
 
+  // The device fired one sample before its window opened and D2's pulse is
+  // already over at sample 0. Searching the data would mark the next pulse, a
+  // different event; the device's own report puts it where the window opens.
+  it("marks a hardware trigger where the device reports it, not where a search finds it", async () => {
+    serialHandle = installFakeNavigatorSerial({
+      requestPort: new FakeSerialPort({
+        respond: sumpResponses(
+          "Open Logic Sniffer v1.01",
+          [[0x21, 4096]],
+          [0x00, 0x00, 0x04, 0x00],
+        ),
+      }),
+    });
+    setBackend("sump");
+    await connect();
+    config.update((c) => ({
+      ...c,
+      sampleRate: 1_000_000,
+      sampleLimit: 4,
+      trigger: { conditions: [{ channel: 2, edge: "high" }] },
+    }));
+
+    await startCapture();
+
+    expect(get(captures)[0].trigger).toBe(0);
+    expect(get(triggerSample)).toBe(0);
+  });
+
   it("records the divider-resolved rate on the buffer, not the request", async () => {
     serialHandle = installFakeNavigatorSerial({
       requestPort: fakeSumpPort([1, 2, 3, 4]),

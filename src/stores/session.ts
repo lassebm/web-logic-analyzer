@@ -567,6 +567,7 @@ export async function startCapture(): Promise<void> {
     if (caps.streaming || index === 1) showCapture(buf);
     statusMessage.set(armingMessage(caps, cfg, index, target));
 
+    let caught: number | null = null;
     session = dev.acquire(
       { sampleRate, sampleLimit: cfg.sampleLimit, trigger: cfg.trigger },
       {
@@ -589,6 +590,7 @@ export async function startCapture(): Promise<void> {
           captureStatus.set("error");
           statusMessage.set(friendlyError(err));
         },
+        onTrigger: (sample) => (caught = sample),
       },
     );
 
@@ -615,7 +617,7 @@ export async function startCapture(): Promise<void> {
       break;
     }
 
-    const trig = triggerMatch(buf, cfg.trigger);
+    const trig = caught ?? triggerMatch(buf, cfg.trigger);
     // The capture is on screen now, so finish rendering it: the trigger mark is
     // free (the match was needed for the record anyway), and the decoder lanes
     // follow when the capture is small enough to afford. Note this decodes but
@@ -634,11 +636,12 @@ export async function startCapture(): Promise<void> {
   if (get(captureStatus) === "running") captureStatus.set("done");
   // Land on the newest capture that was actually kept — the in-flight one may
   // have been discarded as empty.
-  const landed = records.at(-1)?.buffer ?? shown;
+  const last = records.at(-1);
+  const landed = last?.buffer ?? shown;
   if (landed) {
     captureBuffer.set(landed);
     captureSamples.set(landed.sampleCount);
-    finalizeCapture(landed, cfg, records.length);
+    finalizeCapture(landed, last?.trigger ?? null, records.length);
   }
   if (failure) statusMessage.set(failure);
   if (deviceLost)
@@ -707,10 +710,10 @@ export function stepCapture(delta: number): void {
 
 function finalizeCapture(
   buf: CaptureBuffer,
-  cfg: CaptureConfigState,
+  trigger: number | null,
   count: number,
 ): void {
-  triggerSample.set(triggerMatch(buf, cfg.trigger));
+  triggerSample.set(trigger);
   const samples = `${buf.sampleCount.toLocaleString()} samples`;
   fitAndDecode(
     buf,

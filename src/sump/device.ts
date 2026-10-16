@@ -177,8 +177,9 @@ export class SumpDevice implements LogicDevice {
       4,
       Math.floor(Math.min(req.sampleLimit, bound) / 4) * 4,
     );
-    // delaycount == readcount: everything post-trigger, so the trigger lands at
-    // sample 0 and the app needs no pre/post-trigger control.
+    // delaycount == readcount: everything post-trigger, so the window opens at
+    // the trigger and the app needs no pre/post-trigger control. It is also
+    // libsigrok's default, so the setting every compatible has been run with.
     const counts = encodeCounts(want, want);
     // Only drive the trigger unit where the device has one; elsewhere start
     // immediately and let the software trigger find the condition afterwards.
@@ -324,6 +325,14 @@ class SumpAcquisition implements Acquisition {
       );
     }
     this.cb.onProgress?.(collected);
+    // An armed device sends nothing until it has triggered, so the trigger is
+    // where the window opens: sample 0. Say so rather than leave findTrigger to
+    // search for it, because the condition need not show there. An OLS-style
+    // core opens the window a sample *after* the one it fired on (libsigrok's
+    // `trigger_at = … − num_stages`), and a level shorter than that is already
+    // gone, so a search lands on the next occurrence or none. A short dump has
+    // lost its oldest samples, and the trigger with them.
+    if (plan.stage.mask !== 0 && collected === expected) this.cb.onTrigger?.(0);
     this.cb.onData(raw.subarray(expected - collected));
   }
 }

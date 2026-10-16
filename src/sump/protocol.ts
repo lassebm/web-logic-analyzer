@@ -84,7 +84,7 @@ export interface Counts {
  * so 1..4 samples all encode as 0 and the device takes 4.
  *
  * `delaySamples` is how many samples to keep *after* the trigger; passing the
- * full count (what we do) puts the trigger at sample 0, which is why the app
+ * full count (what we do) opens the window at the trigger, which is why the app
  * needs no pre/post-trigger control.
  */
 export function encodeCounts(samples: number, delaySamples: number): Counts {

@@ -37,6 +37,11 @@ export interface CaptureCallbacks {
   onData: (chunk: Uint8Array) => void;
   onProgress?: (samplesCollected: number) => void;
   onError?: (err: unknown) => void;
+  /** The device caught the trigger itself, at this sample of the capture. It
+   *  wins over searching the data, where the condition need not show (see
+   *  `sump/device.ts`); a backend that leaves triggering to software never
+   *  calls it. */
+  onTrigger?: (sample: number) => void;
 }
 
 export interface Acquisition {

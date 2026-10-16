@@ -295,6 +295,73 @@ describe("the arm sequence", () => {
   });
 });
 
+// An OLS-style core opens the window a sample after the one it fired on, so a
+// brief level can be gone before sample 0 — searching the data would then mark
+// the next occurrence, a different event from the one the device caught.
+describe("the trigger position", () => {
+  const high2 = { conditions: [{ channel: 2, edge: "high" as const }] };
+  // D2 went high on the sample before the window and is already low again;
+  // its next high is at index 2.
+  const firedJustBefore = [0x00, 0x00, 0x04, 0x00];
+
+  async function triggerReported(
+    name: string,
+    req: AcquisitionRequest,
+    dump: Uint8Array = reversedDump(firedJustBefore),
+  ): Promise<number[]> {
+    const port = new FakeSerialPort({
+      respond: {
+        0x02: new Uint8Array([0x31, 0x41, 0x4c, 0x53]),
+        0x04: metadataBytes(name, [[0x21, 4096]]),
+        [CMD_RUN]: dump,
+      },
+    });
+    const dev = await connectTo(port);
+    const reported: number[] = [];
+    await dev
+      .acquire(req, {
+        onData: () => {},
+        onTrigger: (s) => reported.push(s),
+      })
+      .run();
+    return reported;
+  }
+
+  it("reports a hardware trigger at sample 0, where the window opens", async () => {
+    const at = await triggerReported(
+      "Open Logic Sniffer v1.01",
+      request({ sampleLimit: 4, trigger: high2 }),
+    );
+    expect(at).toEqual([0]);
+  });
+
+  it("reports nothing when the device was armed to start at once", async () => {
+    // A device without a trigger unit, and an empty spec on one that has it.
+    expect(
+      await triggerReported(
+        "ESP32-BP SUMP",
+        request({ sampleLimit: 4, trigger: high2 }),
+      ),
+    ).toEqual([]);
+    expect(
+      await triggerReported(
+        "Open Logic Sniffer v1.01",
+        request({ sampleLimit: 4 }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("reports nothing when a short dump has lost the trigger sample", async () => {
+    // Newest first, so the half that arrives is the half *without* sample 0.
+    const at = await triggerReported(
+      "Open Logic Sniffer v1.01",
+      request({ sampleLimit: 8, trigger: high2 }),
+      reversedDump([0, 0, 0, 0, 4, 4, 4, 4]).subarray(0, 4),
+    );
+    expect(at).toEqual([]);
+  });
+});
+
 describe("clamping the request", () => {
   // Asking for more than the device holds must shorten the expected byte count,
   // or the read waits forever for bytes that are never coming.

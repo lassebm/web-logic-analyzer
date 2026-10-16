@@ -1,8 +1,9 @@
 // Per-device knowledge that a device's own `0x04` metadata can't supply.
 //
 // Rows are fallbacks, never overrides: metadata always wins. Getting one wrong
-// degrades gently — a device wrongly credited with a hardware trigger just
-// starts capturing immediately, and findTrigger() still finds the condition.
+// degrades gently, except `hardwareTrigger`: a device wrongly credited with one
+// starts capturing immediately, and its trigger is marked at sample 0 whether
+// or not the condition is there — the driver takes the device's word for it.
 //
 // The rules follow libsigrok's openbench-logic-sniffer driver, the client all
 // these devices were tested against; AGENTS.md lists which rules and why.

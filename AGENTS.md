@@ -224,8 +224,13 @@ Pirate v3/v5, AGLA and ESP32-Bit-Pirate.
   protocol, not of one device — and besides hiding the tab, `stores/monitor.ts`
   and the panel refuse defensively.
 - **What a trigger is for on a one-shot device.** A level condition on a device
-  with a trigger unit is exact: it sits armed and catches the real thing. Every
-  other case — any edge, and anything at all on a device without a trigger unit —
+  with a trigger unit is exact: it sits armed and catches the real thing, and
+  the driver reports it at sample 0 (`onTrigger`) instead of searching for it.
+  The window opens at the trigger, not necessarily on it: an OLS-style core
+  starts one sample later (libsigrok's `trigger_at = … − num_stages`), so a
+  level that brief is gone from the data and a search would mark the next
+  occurrence. Pre-trigger samples would bring it back, but would change the
+  counts every compatible has been tested with. Every other case — any edge, and anything at all on a device without a trigger unit —
   is `findTrigger` searching what was already captured. That still earns its
   place: it sets the time origin (the ruler, the marker, and the measurement
   cursors all hang off it) and it is what ends an "until stopped" run. But
